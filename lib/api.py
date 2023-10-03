@@ -5,7 +5,7 @@ from yaml.loader import SafeLoader
 from typing import List
 import polars as pl
 from math import floor, ceil
-import os
+import os, time
 
 PATH = os.path.dirname(__file__)
 
@@ -17,7 +17,7 @@ with open(CFG_YAML_PATH, "r") as cfg_file:
     CONFIG = yaml.load(cfg_file, Loader=SafeLoader)
 
 class Query(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    topology: str = Field(default='')
     ami_id: List[str]
     from_date: datetime
     to_date: datetime
@@ -53,45 +53,34 @@ def batch_iterator(query: Query):
     for batch_i in range(0, ceil(number_of_batches)):
         from_date = query.from_date + batch_i*deltatime
         to_date = min(from_date + timedelta(hours=sampled_delta), query.to_date)
-        yield Query(ami_id=query.ami_id, from_date=from_date, to_date=to_date, resolution=query.resolution, type=query.type, is_utc=query.is_utc)
+        yield Query(topology=query.topology, ami_id=query.ami_id, from_date=from_date, to_date=to_date, resolution=query.resolution, type=query.type, is_utc=query.is_utc)
 
 
 def fetch_bulk(query: Query) -> pl.DataFrame:
 
     for index, batch_i in enumerate(batch_iterator(query)):
 
-        '''
-        response = requests.post(url=CONFIG['host_url'] + 'timeseries/bulkgetvalues',
-                                 headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'XApiKey': f"{CONFIG['api_key']}"},
-                                 params={'FromDate': batch_i.from_date.isoformat(),
-                                         'ToDate': batch_i.to_date.isoformat(),
-                                         'Type': batch_i.type,
-                                         'Resolution': batch_i.resolution,
-                                         'isUtc': batch_i.is_utc},
-                                 data=json.dumps({"meteringPointIds": batch_i.ami_id})
-                                 )
-        '''
-        class Response:
-            def __init__(self, data):
-                self.data = data
+        retry = True
+        while retry:
+            response = requests.post(url=CONFIG['host_url'] + 'timeseries/bulkgetvalues',
+                                     headers={'Accept': 'application/json', 'Content-Type': 'application/json', 'XApiKey': f"{CONFIG['api_key']}"},
+                                     params={'FromDate': batch_i.from_date.isoformat(),
+                                             'ToDate': batch_i.to_date.isoformat(),
+                                             'Type': batch_i.type,
+                                             'Resolution': batch_i.resolution,
+                                             'isUtc': batch_i.is_utc},
+                                     data=json.dumps({"meteringPointIds": batch_i.ami_id})
+                                     )
+            retry = (response.status_code != 200)
+            if retry:
+                print(f"Invalid response from API server with code {response.status_code} for url {url}. Sleep for {60*30} min")
+                time.sleep(60*30)
 
-            @property
-            def status_code(self):
-                return 200
-
-            def json(self):
-                return json.loads(self.data)
-
-        with open(PATH + '/../data/response.json','r') as fp:
-            response = Response(fp.read())
-
-
-        if response.status_code != 200:
-            raise Exception(f"Invalid response from API server with code {response.status_code}")
-
-        df = pl.DataFrame(response.json()).explode('timeseries').unnest('timeseries')
-        nan_cnt = (df.null_count().select(pl.all()).sum(axis=1).alias('nan')).item()
-        if nan_cnt:
-            df = df.drop_nulls()
-
-        yield QueryRes(query=batch_i, df=df)
+        try:
+            df = pl.DataFrame(response.json()).explode('timeseries').unnest('timeseries')
+            nan_cnt = (df.null_count().select(pl.all()).sum(axis=1).alias('nan')).item()
+            if nan_cnt:
+                df = df.drop_nulls()
+            yield QueryRes(query=batch_i, df=df)
+        except Exception as e:
+            print( f"[{datetime.utcnow()}] {batch_i.topology} abort parquet write for batch <{query.name}>")

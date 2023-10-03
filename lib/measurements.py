@@ -15,13 +15,17 @@ def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_dat
             shutil.rmtree(topology_path)
         os.mkdir(topology_path)
 
-        ami_id = pd.DataFrame(topology[1], columns=['topology','ami_id'])['ami_id'].values
+        topology_name = topology[0]
+        topology_data = topology[1]
 
-        for query in fetch_bulk(Query(ami_id=ami_id, from_date=from_date, to_date=to_date, resolution=1, type=1)):
-            print(f"[{topology[0]}] Write parquet for batch {query.name}")
+        ami_id = pd.DataFrame(data=topology_data, columns=['topology','ami_id'])['ami_id'].values
+
+        for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_id, from_date=from_date, to_date=to_date, resolution=1, type=1)):
+            print( f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}>")
             query.df.write_parquet(os.path.join(topology_path, query.name))
-        for query in fetch_bulk(Query(ami_id=ami_id, from_date=from_date, to_date=to_date, resolution=1, type=3)):
-            print(f"[{topology[0]}] Write parquet for batch {query.name}")
+
+        for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_id, from_date=from_date, to_date=to_date, resolution=1, type=3)):
+            print( f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}>")
             query.df.write_parquet(os.path.join(topology_path, query.name))
 
 
