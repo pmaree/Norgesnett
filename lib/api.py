@@ -25,6 +25,10 @@ class Query(BaseModel):
     type: int = Field(default=1)
     is_utc: bool = Field(default=True)
 
+    @property
+    def name(self) -> str:
+        return f"{self.from_date}_{self.to_date}_R{self.resolution}_T{self.type}"
+
 
 class QueryRes:
     def __init__(self, query: Query, df: pl.DataFrame):
@@ -34,10 +38,6 @@ class QueryRes:
     @property
     def name(self) -> str:
         return f"{self.query.from_date}_{self.query.to_date}_R{self.query.resolution}_T{self.query.type}"
-
-    @property
-    def dara(self) -> pl.DataFrame:
-        return self.df
 
 
 def batch_iterator(query: Query):
@@ -73,7 +73,7 @@ def fetch_bulk(query: Query) -> pl.DataFrame:
                                      )
             retry = (response.status_code != 200)
             if retry:
-                print(f"Invalid response from API server with code {response.status_code} for url {url}. Sleep for {60*30} min")
+                print(f"[{datetime.utcnow()}] {batch_i.topology} invalid API response for for batch <{batch_i.name}>")
                 time.sleep(60*30)
 
         try:
@@ -83,4 +83,4 @@ def fetch_bulk(query: Query) -> pl.DataFrame:
                 df = df.drop_nulls()
             yield QueryRes(query=batch_i, df=df)
         except Exception as e:
-            print( f"[{datetime.utcnow()}] {batch_i.topology} abort parquet write for batch <{query.name}>")
+            print( f"[{datetime.utcnow()}] {batch_i.topology} abort parquet write for batch <{batch_i.name}>")

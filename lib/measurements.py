@@ -9,16 +9,20 @@ from lib.api import fetch_bulk, Query, QueryRes
 def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_date: datetime):
     df = pl.read_parquet(src_path)
 
-    for topology in df.partition_by(by='topology', maintain_order=True, as_dict=True).items():
-        topology_path = os.path.join(dst_path, topology[0])
+    topology_list = df.unique(subset=['topology']).select(pl.col('topology')).to_numpy().flatten().tolist()
+
+    for topology_name in topology_list:
+        topology_path = os.path.join(dst_path, topology_name)
         if os.path.exists(topology_path):
             shutil.rmtree(topology_path)
+
+    for topology_name in topology_list:
+
+        topology_data = df.filter(pl.col('topology')==topology_name)
+        topology_path = os.path.join(dst_path, topology_name)
         os.mkdir(topology_path)
 
-        topology_name = topology[0]
-        topology_data = topology[1]
-
-        ami_id = pd.DataFrame(data=topology_data, columns=['topology','ami_id'])['ami_id'].values
+        ami_id = topology_data.select(pl.col('ami_id')).to_series()
 
         for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_id, from_date=from_date, to_date=to_date, resolution=1, type=1)):
             print( f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}>")
