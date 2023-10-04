@@ -10,7 +10,7 @@ import os
 
 from lib import Logging
 
-log = Logging
+log = Logging()
 
 PATH = os.path.dirname(__file__)
 
