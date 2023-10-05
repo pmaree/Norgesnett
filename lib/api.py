@@ -21,6 +21,7 @@ CONFIG: dict
 with open(CFG_YAML_PATH, "r") as cfg_file:
     CONFIG = yaml.load(cfg_file, Loader=SafeLoader)
 
+
 class Query(BaseModel):
     topology: str = Field(default='')
     ami_id: List[str]
@@ -33,6 +34,32 @@ class Query(BaseModel):
     @property
     def name(self) -> str:
         return f"{self.from_date}_{self.to_date}_R{self.resolution}_T{self.type}"
+
+
+class Timeseries(BaseModel):
+    fromTime: str
+    toTime: str
+    value: float
+    unit: str
+    status: bool
+
+
+class ValueResponse(BaseModel):
+    meteringPointId: str = Field(default='')
+    type: int
+    timeseries: List[Timeseries]
+
+
+class BulkResponse(BaseModel):
+    data: List[ValueResponse]
+
+    @property
+    def to_polars(self) -> pl.DataFrame:
+        df = pl.DataFrame(self.model_dump()['data']).explode('timeseries').unnest('timeseries')
+        nan_cnt = (df.null_count().select(pl.all()).sum(axis=1).alias('nan')).item()
+        if nan_cnt:
+            df = df.drop_nulls()
+        return df
 
 
 class QueryRes:
@@ -81,12 +108,12 @@ def fetch_bulk(query: Query) -> pl.DataFrame:
             prepped = req.prepare()
             response = s.send(prepped)
 
-            # parse response data as polars dataframe
-            try:
-                df = pl.DataFrame(response.json()).explode('timeseries').unnest('timeseries')
-                nan_cnt = (df.null_count().select(pl.all()).sum(axis=1).alias('nan')).item()
-                if nan_cnt:
-                    df = df.drop_nulls()
-                yield QueryRes(query=batch_i, df=df)
-            except Exception as e:
-                log.exception(f"[{datetime.utcnow()}] {batch_i.topology} abort parquet write for batch <{batch_i.name}>")
+            if response.status_code == 200:
+                # parse response data as polars dataframe
+                try:
+                    df = BulkResponse(**{'data':response.json()}).to_polars
+                    yield QueryRes(query=batch_i, df=df)
+                except Exception as e:
+                    log.exception(f"[{datetime.utcnow()}] {batch_i.topology} abort parquet write for batch <{batch_i.name}>")
+            else:
+                log.warning(f"[{datetime.utcnow()}] {batch_i.topology} received invalid API response {response.status_code} for <{batch_i.name}>")
