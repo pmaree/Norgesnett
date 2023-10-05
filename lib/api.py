@@ -6,6 +6,7 @@ from yaml.loader import SafeLoader
 from typing import List
 import polars as pl
 from math import floor, ceil
+from requests.adapters import HTTPAdapter, Retry
 import os
 
 from lib import Logging
@@ -14,7 +15,7 @@ log = Logging()
 
 PATH = os.path.dirname(__file__)
 
-SAMPLES_PER_BATCH_LIMIT = 20000
+SAMPLES_PER_BATCH_LIMIT = 50000
 CFG_YAML_PATH = PATH + "/config.yaml"
 CONFIG: dict
 
@@ -91,6 +92,11 @@ def batch_iterator(query: Query):
 def fetch_bulk(query: Query) -> pl.DataFrame:
 
     with requests.Session() as s:
+
+        # retry strategy
+        retries = Retry(total=5, backoff_factor=2, status_forcelist=[400, 401, 500], allowed_methods=frozenset(['GET', 'POST']))
+        s.mount('https://', HTTPAdapter(max_retries=retries))
+
         for index, batch_i in enumerate(batch_iterator(query)):
 
             # prepare request

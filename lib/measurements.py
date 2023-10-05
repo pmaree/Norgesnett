@@ -6,7 +6,7 @@ from lib import Logging
 
 log = Logging()
 
-from lib.api import fetch_bulk, Query, QueryRes
+from lib.api import fetch_bulk, Query
 
 
 class ProcessingRegister:
