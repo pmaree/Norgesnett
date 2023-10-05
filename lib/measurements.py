@@ -59,11 +59,11 @@ def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_dat
             log.info(f"[{datetime.utcnow()}] Topology {topology_name} selected for historical measurement retrieval with {ami_id_cnt} AMI associations.")
 
             for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_ids, from_date=from_date, to_date=to_date, resolution=1, type=1)):
-                log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}>")
+                log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
                 query.df.write_parquet(os.path.join(topology_path, query.name))
 
             for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_ids, from_date=from_date, to_date=to_date, resolution=1, type=3)):
-                log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}>")
+                log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
                 query.df.write_parquet(os.path.join(topology_path, query.name))
 
             log.info(f"[{datetime.utcnow()}] Topology {topology_name} completed historical measurement retrieval with {ami_id_cnt} AMI associations.")

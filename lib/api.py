@@ -15,7 +15,7 @@ log = Logging()
 
 PATH = os.path.dirname(__file__)
 
-SAMPLES_PER_BATCH_LIMIT = 50000
+SAMPLES_PER_BATCH_LIMIT = 20000
 CFG_YAML_PATH = PATH + "/config.yaml"
 CONFIG: dict
 
@@ -56,10 +56,22 @@ class BulkResponse(BaseModel):
 
     @property
     def to_polars(self) -> pl.DataFrame:
-        df = pl.DataFrame(self.model_dump()['data']).explode('timeseries').unnest('timeseries')
+        df = pl.DataFrame(self.model_dump()['data'])
+
+        # check for any possible nulls
         nan_cnt = (df.null_count().select(pl.all()).sum(axis=1).alias('nan')).item()
         if nan_cnt:
             df = df.drop_nulls()
+
+        # flag and remove empty data series
+        df = df.with_columns(pl.col('timeseries').apply(lambda x: len(x)).alias('length')).filter(pl.col('length')>0)
+
+        # raise exception if dataframe is empty
+        if df.shape[0]:
+            df = df.explode('timeseries').unnest('timeseries')
+        else:
+            raise Exception(f"no measurements are available for topology request")
+
         return df
 
 
@@ -71,6 +83,10 @@ class QueryRes:
     @property
     def name(self) -> str:
         return f"{self.query.from_date}_{self.query.to_date}_R{self.query.resolution}_T{self.query.type}"
+
+    @property
+    def sample_cnt(self) -> int:
+        return self.df.shape[0]
 
 
 def batch_iterator(query: Query):
@@ -89,12 +105,12 @@ def batch_iterator(query: Query):
         yield Query(topology=query.topology, ami_id=query.ami_id, from_date=from_date, to_date=to_date, resolution=query.resolution, type=query.type, is_utc=query.is_utc)
 
 
-def fetch_bulk(query: Query) -> pl.DataFrame:
+def fetch_bulk(query: Query) -> QueryRes:
 
     with requests.Session() as s:
 
         # retry strategy
-        retries = Retry(total=5, backoff_factor=2, status_forcelist=[400, 401, 500], allowed_methods=frozenset(['GET', 'POST']))
+        retries = Retry(total=5, backoff_factor=2, status_forcelist=[401, 500], allowed_methods=frozenset(['GET', 'POST']))
         s.mount('https://', HTTPAdapter(max_retries=retries))
 
         for index, batch_i in enumerate(batch_iterator(query)):
@@ -120,6 +136,6 @@ def fetch_bulk(query: Query) -> pl.DataFrame:
                     df = BulkResponse(**{'data':response.json()}).to_polars
                     yield QueryRes(query=batch_i, df=df)
                 except Exception as e:
-                    log.exception(f"[{datetime.utcnow()}] {batch_i.topology} abort parquet write for batch <{batch_i.name}>")
+                    log.exception(f"[{datetime.utcnow()}] {batch_i.topology} abort parquet write for batch <{batch_i.name}>: {e}")
             else:
                 log.warning(f"[{datetime.utcnow()}] {batch_i.topology} received invalid API response {response.status_code} for <{batch_i.name}>")
