@@ -15,7 +15,7 @@ log = Logging()
 
 PATH = os.path.dirname(__file__)
 
-SAMPLES_PER_BATCH_LIMIT = 100000
+SAMPLES_PER_BATCH_LIMIT =100000
 CFG_YAML_PATH = PATH + "/config.yaml"
 CONFIG: dict
 

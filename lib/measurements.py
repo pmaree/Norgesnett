@@ -72,5 +72,29 @@ def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_dat
 
 # process the raw measurements
 def process_measuremets(src_path: str, dst_path: str):
-    pass
+    registry_path = os.path.join(src_path, 'registry')
 
+    if os.path.exists(registry_path):
+        df = pl.read_parquet(registry_path)
+        df = df.filter(pl.col('processed') == True)
+        if df.shape[0]:
+
+            df_processed = pl.DataFrame()
+            for row in df.iter_rows(named=True):
+                topology_name = row['topology']
+                file_list = os.listdir(os.path.join(src_path,topology_name))
+
+                df_topology = pl.DataFrame()
+                for file_name in file_list:
+                    df_pl = pl.read_parquet(os.path.join(src_path, topology_name, file_name)).drop(['status','length'])
+                    df_topology = df_pl if df_topology.is_empty() else df_topology.vstack(df_pl)
+
+                df_processed = df_topology if df_processed.is_empty() else df_processed.vstack(df_topology)
+
+                log.info(f"Processed measurements for {topology_name} with {df_topology.shape[0]} sample records taken from {df_topology.select(pl.min('fromTime')).item()} to {df_topology.select(pl.max('fromTime')).item()}")
+            log.info(f"Completed measurement processing of {df_processed.shape[0]} sample records taken from {df_processed.select(pl.min('fromTime')).item()} to {df_processed.select(pl.max('fromTime')).item()}")
+
+    processed_file_name = f"{df_processed.select(pl.min('fromTime')).item()}_{df_processed.select(pl.max('fromTime')).item()}_{datetime.now().date()}"
+    save_path = os.path.join(dst_path, processed_file_name)
+    log.info(f"Processed data saved at parquet file {save_path}")
+    df_processed.write_parquet(save_path)
