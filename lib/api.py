@@ -15,7 +15,7 @@ log = Logging()
 
 PATH = os.path.dirname(__file__)
 
-SAMPLES_PER_BATCH_LIMIT = 20000
+SAMPLES_PER_BATCH_LIMIT = 100000
 CFG_YAML_PATH = PATH + "/config.yaml"
 CONFIG: dict
 
@@ -110,25 +110,28 @@ def fetch_bulk(query: Query) -> QueryRes:
     with requests.Session() as s:
 
         # retry strategy
-        retries = Retry(total=5, backoff_factor=2, status_forcelist=[401, 500], allowed_methods=frozenset(['GET', 'POST']))
+        retries = Retry(total=5, backoff_factor=2, status_forcelist=[400, 401, 500], allowed_methods=frozenset(['GET', 'POST']))
         s.mount('https://', HTTPAdapter(max_retries=retries))
 
         for index, batch_i in enumerate(batch_iterator(query)):
 
-            # prepare request
-            url = CONFIG['host_url'] + 'timeseries/bulkgetvalues'
-            data = json.dumps({"meteringPointIds": batch_i.ami_id})
-            headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'XApiKey': f"{CONFIG['api_key']}"}
-            params={'FromDate': batch_i.from_date.isoformat(),
-                    'ToDate': batch_i.to_date.isoformat(),
-                    'Type': batch_i.type,
-                    'Resolution': batch_i.resolution,
-                    'isUtc': batch_i.is_utc}
+            try:
+                # prepare request
+                url = CONFIG['host_url'] + 'timeseries/bulkgetvalues'
+                data = json.dumps({"meteringPointIds": batch_i.ami_id})
+                headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'XApiKey': f"{CONFIG['api_key']}"}
+                params={'FromDate': batch_i.from_date.isoformat(),
+                        'ToDate': batch_i.to_date.isoformat(),
+                        'Type': batch_i.type,
+                        'Resolution': batch_i.resolution,
+                        'isUtc': batch_i.is_utc}
 
-            # execute query
-            req = Request('POST', url=url, data=data, headers=headers, params=params)
-            prepped = req.prepare()
-            response = s.send(prepped)
+                # execute query
+                req = Request('POST', url=url, data=data, headers=headers, params=params)
+                prepped = req.prepare()
+                response = s.send(prepped, timeout=1000)
+            except Exception as e:
+                raise Exception(e)
 
             if response.status_code == 200:
                 # parse response data as polars dataframe

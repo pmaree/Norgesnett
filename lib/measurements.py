@@ -54,7 +54,6 @@ def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_dat
         if processed is False:
 
             topology_path, topology_name = registry.entry(topology_name=row['topology'])
-            ami_ids = row['ami_ids']
 
             log.info(f"[{datetime.utcnow()}] Topology {topology_name} selected for historical measurement retrieval with {ami_id_cnt} AMI associations.")
 

@@ -11,7 +11,7 @@ PATH = os.path.dirname(__file__)
 if __name__ == "__main__":
 
     from_date ='2023-03-01T00:00:00'
-    to_date = '2023-10-01T00:00:00'
+    to_date = '2023-09-01T00:00:00'
     usagepoints_file = "2023-10-03T14:53:40.381116"
 
     log.info(f"[{datetime.now().isoformat()}] Retrieve AMI data for usagepoints file {usagepoints_file} in range {from_date} to {to_date}")
