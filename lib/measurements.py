@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 import polars as pl
 import os, shutil
@@ -49,33 +50,42 @@ class ProcessingRegister:
 # fetch raw AMI measurement for those AMI's associated with a topology
 def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_date: datetime):
 
-    # keep tracked of fetched data
-    registry = ProcessingRegister(root_path=dst_path, df=pl.read_parquet(src_path))
+    while True:
+        try:
+            # keep tracked of fetched data
+            registry = ProcessingRegister(root_path=dst_path, df=pl.read_parquet(src_path))
 
-    for row in registry.read().rows(named=True):
+            for row in registry.read().rows(named=True):
 
-        processed = row['processed']
-        ami_ids = row['ami_ids']
-        ami_id_cnt = row['ami_id_cnt']
+                processed = row['processed']
+                ami_ids = row['ami_ids']
+                ami_id_cnt = row['ami_id_cnt']
 
-        if processed is False:
+                if processed is False:
 
-            topology_path, topology_name = registry.entry(topology_name=row['topology'])
+                    topology_path, topology_name = registry.entry(topology_name=row['topology'])
 
-            log.info(f"[{datetime.utcnow()}] Topology {topology_name} selected for historical measurement retrieval with {ami_id_cnt} AMI associations.")
+                    log.info(f"[{datetime.utcnow()}] Topology {topology_name} selected for historical measurement retrieval with {ami_id_cnt} AMI associations.")
 
-            for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_ids, from_date=from_date, to_date=to_date, resolution=1, type=1)):
-                log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
-                query.df.write_parquet(os.path.join(topology_path, query.name))
+                    for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_ids, from_date=from_date, to_date=to_date, resolution=1, type=1)):
+                        log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
+                        query.df.write_parquet(os.path.join(topology_path, query.name))
 
-            for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_ids, from_date=from_date, to_date=to_date, resolution=1, type=3)):
-                log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
-                query.df.write_parquet(os.path.join(topology_path, query.name))
+                    for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_ids, from_date=from_date, to_date=to_date, resolution=1, type=3)):
+                        log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
+                        query.df.write_parquet(os.path.join(topology_path, query.name))
 
-            processed, _, total = registry.update(topology=topology_name, processed=True)
+                    processed, _, total = registry.update(topology=topology_name, processed=True)
 
-            log.info(f"[{datetime.utcnow()}] Topology {topology_name} [{processed}/{total}] completed historical measurement retrieval with {ami_id_cnt} AMI associations.")
+                    log.info(f"[{datetime.utcnow()}] Topology {topology_name} [{processed}/{total}] completed historical measurement retrieval with {ami_id_cnt} AMI associations.")
 
+                    if processed == total:
+                        log.info(f"Processing completed for [{processed}/{total}] topologies. Goodbye.")
+                        break
+
+        except Exception as e:
+            log.exception(e)
+            time.sleep(60*30)
 
 # process the raw measurements
 def process_measuremets(src_path: str, dst_path: str):

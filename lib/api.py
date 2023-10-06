@@ -131,7 +131,7 @@ def fetch_bulk(query: Query) -> QueryRes:
                 prepped = req.prepare()
                 response = s.send(prepped, timeout=1000)
             except Exception as e:
-                raise Exception(e)
+                raise Exception(f"[{datetime.utcnow()}] Failed in the API request with error code {e}. Session will be re-initiated after a 30 minute sleep.")
 
             if response.status_code == 200:
                 # parse response data as polars dataframe
