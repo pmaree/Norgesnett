@@ -10,6 +10,7 @@ from lib.api import fetch_bulk, Query
 
 
 class ProcessingRegister:
+
     def __init__(self, root_path: str, df: pl.DataFrame):
         self.root = root_path
         self.path = os.path.join(root_path, 'registry')
@@ -30,6 +31,12 @@ class ProcessingRegister:
         df = self.read()
         df = df.with_columns(processed=pl.when(pl.col('topology')==topology).then(processed).otherwise(pl.col("processed")).alias('processed'))
         df.write_parquet(self.path)
+
+        # some processing stats
+        processed = df.filter(pl.col('processed')==True).shape[0]
+        unprocessed = df.filter(pl.col('processed')==False).shape[0]
+        total = processed + unprocessed
+        return processed, unprocessed, total
 
     def prepare(self):
         df = self.read()
@@ -65,9 +72,9 @@ def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_dat
                 log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
                 query.df.write_parquet(os.path.join(topology_path, query.name))
 
-            log.info(f"[{datetime.utcnow()}] Topology {topology_name} completed historical measurement retrieval with {ami_id_cnt} AMI associations.")
+            processed, _, total = registry.update(topology=topology_name, processed=True)
 
-            registry.update(topology=topology_name, processed=True)
+            log.info(f"[{datetime.utcnow()}] Topology {topology_name} [{processed}/{total}] completed historical measurement retrieval with {ami_id_cnt} AMI associations.")
 
 
 # process the raw measurements
