@@ -7,6 +7,11 @@ import os
 
 time_format = '%Y-%m-%dT%H:%M:%S'
 
+pd.set_option('display.max_columns', 500)
+pd.set_option('display.max_rows', 50)
+pd.set_option('display.max_colwidth', None)
+pd.set_option('display.max_columns', None)
+
 class Analysis:
     def __init__(self, name):
         self.stats = {}
@@ -15,9 +20,11 @@ class Analysis:
         self._ami_cnt = 1
         self._prod_cnt = 0
         self._load_cnt = 1
-        self._max_export_kWh = float()
-        self._max_production_kWh = float()
-        self._max_consumption_kWh = float()
+        self._pluskunde = False
+        self._max_export_kWh = float(0)
+        self._ave_export_kWh = float(0)
+        self._max_production_kWh = float(0)
+        self._max_consumption_kWh = float(0)
 
     @property
     def to_polars(self) -> pl.DataFrame:
@@ -26,13 +33,22 @@ class Analysis:
                              'prod_cnt': self._prod_cnt,
                              'load_cnt': self._load_cnt,
                              'penetration': self._prod_cnt/self._ami_cnt*100,
+                             'pluskunder': self._pluskunde,
                              'max_export_kWh': self._max_export_kWh,
                              'ave_export_kWh': self._ave_export_kWh,
                              'max_production_kWh': self._max_production_kWh,
                              'max_consumption_kWh': self._max_consumption_kWh})
 
     @property
-    def max_production_kWh(self):
+    def pluskunde(self)->pl.Boolean:
+        return self._pluskunde
+
+    @pluskunde.setter
+    def pluskunde(self, value):
+        self._pluskunde = value
+
+    @property
+    def max_production_kWh(self)->pl.Float64:
         return self._max_production_kWh
 
     @max_production_kWh.setter
@@ -40,7 +56,7 @@ class Analysis:
         self._max_production_kWh = value
 
     @property
-    def max_consumption_kWh(self):
+    def max_consumption_kWh(self)->pl.Float64:
         return self._max_consumption_kWh
 
     @max_consumption_kWh.setter
@@ -48,7 +64,7 @@ class Analysis:
         self._max_consumption_kWh = value
 
     @property
-    def ami_cnt(self):
+    def ami_cnt(self)->pl.Float64:
         return self._ami_cnt
 
     @ami_cnt.setter
@@ -56,7 +72,7 @@ class Analysis:
         self._ami_cnt = value
 
     @property
-    def prod_cnt(self):
+    def prod_cnt(self)->pl.Float64:
         return self._prod_cnt
 
     @prod_cnt.setter
@@ -64,7 +80,7 @@ class Analysis:
         self._prod_cnt = value
 
     @property
-    def load_cnt(self):
+    def load_cnt(self)->pl.Float64:
         return self._load_cnt
 
     @load_cnt.setter
@@ -124,7 +140,7 @@ def interpolate(df: pd.DataFrame, date_from: datetime, date_to: datetime, reinde
 # return all AMI points considered a prosumer
 def get_prosumers(df:pl.DataFrame)->pl.DataFrame:
 
-    ami_cnt = df.unique(subset='meteringPointId')
+    ami_cnt = df.n_unique(subset='meteringPointId')
     df_consumers = pl.DataFrame(schema=df.schema)
     df_producers = df.filter(pl.col('type')==3).unique(subset='meteringPointId')
 
@@ -165,15 +181,17 @@ def statistics(src_path: str, dst_path: str, date_from: datetime, date_to: datet
     if os.path.exists(dst_path):
         with pl.Config() as cfg:
             cfg.set_tbl_cols(-1)
-            cfg.set_tbl_rows(100)
-        print(f"{name} already exists")
-        df = pl.read_parquet(dst_path).sort(by='max_export_kWh')
+            cfg.set_tbl_rows(50)
+            cfg.set_tbl_width_chars(width=1500)
+            df = pl.read_parquet(dst_path).sort(by='penetration', descending=True)
+            print('')
 
         return
 
     file_list = os.listdir(src_path)
 
     df_stats = pl.DataFrame()
+
     for index, file_name in enumerate(file_list):
 
         print(f"[{index}] Process {file_name}")
@@ -184,28 +202,32 @@ def statistics(src_path: str, dst_path: str, date_from: datetime, date_to: datet
 
         stats = Analysis(file_name)
         stats.ami_cnt = df.n_unique(subset='meteringPointId')
-        stats.load_cnt = df.filter(pl.col('type')==1).unique(subset='meteringPointId').shape[0]
-        stats.prod_cnt = df.filter(pl.col('type')==3).unique(subset='meteringPointId').shape[0]
+        stats.load_cnt = df.filter(pl.col('type') == 1).unique(subset='meteringPointId').shape[0]
+        stats.prod_cnt = df.filter(pl.col('type') == 3).unique(subset='meteringPointId').shape[0]
 
         # only process if we have production
 
-        if stats.prod_cnt:
-            # time slicing
-            df = df.with_columns( pl.col("fromTime").str.to_datetime(format=time_format),pl.col("toTime").str.to_datetime(format=time_format) ).sort(by="fromTime")
-            df = df.filter(pl.col("fromTime").is_between(date_from, date_to)).sort(by='fromTime')
+        # time slicing
+        df = df.with_columns( pl.col("fromTime").str.to_datetime(format=time_format),pl.col("toTime").str.to_datetime(format=time_format) ).sort(by="fromTime")
+        #date_from = max(df.select('fromTime').min().item(), date_from)
+        #date_to = min(df.select('fromTime').max().item(), date_to)
+        df = df.filter(pl.col("fromTime").is_between(date_from, date_to)).sort(by='fromTime')
 
-            # calculate prosumers
+        if stats.prod_cnt:
+            stats.pluskunde = True
             prosumers = get_prosumers(df)
-            stats.max_consumption_kWh = prosumers['consumer'].unique(subset='meteringPointId').filter(pl.col('type')==1).select(pl.col('value').max()).item()
             stats.max_production_kWh = prosumers['producer'].unique(subset='meteringPointId').filter(pl.col('type')==3).select(pl.col('value').max()).item()
+            stats.max_consumption_kWh = prosumers['consumer'].unique(subset='meteringPointId').filter(pl.col('type')==1).select(pl.col('value').max()).item()
 
             # get self-consumption statistic
-            df_self_consumption =  self_consumption(prosumers)
+            df_self_consumption = self_consumption(prosumers)
 
             stats.max_export_kWh = df_self_consumption['grid_export'].max()
             stats.ave_export_kWh = df_self_consumption['grid_export'].max()/prosumers['ami_cnt']
-            df_stats = stats.to_polars if df_stats.is_empty() else df_stats.vstack(stats.to_polars)
+        else:
+            stats.max_consumption_kWh = df.filter(pl.col('type')==1).select(pl.col('value')).max().item()
 
+        df_stats = stats.to_polars if df_stats.is_empty() else df_stats.vstack(stats.to_polars)
 
     df_stats.write_parquet(dst_path)
     print(f"Complete. Save statistics to {dst_path}")
