@@ -7,7 +7,11 @@ from lib import Logging
 
 log = Logging()
 
+
 from lib.api import fetch_bulk, Query
+
+
+time_format = '%Y-%m-%dT%H:%M:%S'
 
 
 class ProcessingRegister:
@@ -48,7 +52,7 @@ class ProcessingRegister:
 
 
 # fetch raw AMI measurement for those AMI's associated with a topology
-def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_date: datetime):
+def fetch_raw(src_path: str, dst_path: str, from_date: datetime, to_date: datetime):
 
     while True:
         try:
@@ -87,9 +91,14 @@ def fetch_measurements(src_path: str, dst_path: str, from_date: datetime, to_dat
             log.exception(e)
             time.sleep(60*30)
 
+
 # process the raw measurements
-def process_measuremets(src_path: str, dst_path: str):
+def raw_to_bronze(src_path: str, dst_path: str):
     registry_path = os.path.join(src_path, 'registry')
+
+    # clean up previous processed data
+    shutil.rmtree(dst_path)
+    os.mkdir(dst_path)
 
     if os.path.exists(registry_path):
         df = pl.read_parquet(registry_path)
@@ -97,21 +106,38 @@ def process_measuremets(src_path: str, dst_path: str):
         if df.shape[0]:
 
             df_processed = pl.DataFrame()
-            for row in df.iter_rows(named=True):
+            for index, row in enumerate(df.iter_rows(named=True)):
                 topology_name = row['topology']
                 file_list = os.listdir(os.path.join(src_path,topology_name))
 
                 df_topology = pl.DataFrame()
                 for file_name in file_list:
                     df_pl = pl.read_parquet(os.path.join(src_path, topology_name, file_name)).drop(['status','length'])
-                    df_topology = df_pl if df_topology.is_empty() else df_topology.vstack(df_pl)
+                    if df_pl.shape[0]:
+                        df_topology = df_pl if df_topology.is_empty() else df_topology.vstack(df_pl)
 
-                df_processed = df_topology if df_processed.is_empty() else df_processed.vstack(df_topology)
+                if df_topology.shape[0]:
+                    file_name = f"{topology_name}_{df_topology.select(pl.min('fromTime')).item()}_{df_topology.select(pl.max('fromTime')).item()}"
+                    save_path = os.path.join(dst_path, file_name)
+                    df_topology.write_parquet(save_path)
 
-                log.info(f"Processed measurements for {topology_name} with {df_topology.shape[0]} sample records taken from {df_topology.select(pl.min('fromTime')).item()} to {df_topology.select(pl.max('fromTime')).item()}")
-            log.info(f"Completed measurement processing of {df_processed.shape[0]} sample records taken from {df_processed.select(pl.min('fromTime')).item()} to {df_processed.select(pl.max('fromTime')).item()}")
+                    log.info(f"[{index}] Processed measurements for {topology_name} with {df_topology.shape[0]} sample records taken from {df_topology.select(pl.min('fromTime')).item()} to {df_topology.select(pl.max('fromTime')).item()}")
+                else:
+                    log.info(f"[{index}] Skipped processing measurements for {topology_name} with {df_topology.shape[0]}")
 
-    processed_file_name = f"{df_processed.select(pl.min('fromTime')).item()}_{df_processed.select(pl.max('fromTime')).item()}_{datetime.now().date()}"
-    save_path = os.path.join(dst_path, processed_file_name)
-    log.info(f"Processed data saved at parquet file {save_path}")
-    df_processed.write_parquet(save_path)
+
+def bronze_to_silver(src_path: str, dst_path: str, date_from: datetime, date_to: datetime):
+    file_list = os.listdir(src_path)
+    for file_name in file_list:
+        # read parquet
+        file_path = os.path.join(src_path, file_name)
+        df = pl.read_parquet(file_path)
+
+        # capture data range of interest
+        df = df.with_columns( pl.col("fromTime").str.to_datetime(format=time_format))
+        df = df.with_columns( pl.col("toTime").str.to_datetime(format=time_format))
+        df = df.filter(pl.col("fromTime").is_between(date_from, date_to)).sort(by='fromTime')
+
+        # split data into respective Pload, Pprod
+        df_load = df.filter(pl.col('type')==1)
+        df_prod = df.filter(pl.col('type')==3)
