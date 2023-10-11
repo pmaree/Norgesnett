@@ -12,6 +12,7 @@ pd.set_option('display.max_rows', 50)
 pd.set_option('display.max_colwidth', None)
 pd.set_option('display.max_columns', None)
 
+
 class Analysis:
     def __init__(self, name):
         self.stats = {}
@@ -113,17 +114,17 @@ def sample_timeseries(resolution_hour: float, values: list, index: list) -> pd.D
 
 
 # interpolate for missing data and pad with zeros on date range outside of data scope
-def interpolate(df: pd.DataFrame, date_from: datetime, date_to: datetime, reindex=False, plot=False) -> pd.DataFrame:
+def interpolate(df: pd.DataFrame, date_range=dict, zero_padding=False, plot=False) -> pd.DataFrame:
     resolution_hour = 1
     values = df['value'].values
     index = df['fromTime'].values
 
     df = pd.DataFrame(sample_timeseries(resolution_hour=resolution_hour, values=values, index=index))
 
-    if reindex:
+    if zero_padding:
         df = df.set_index('fromTime')
         df = df.resample('H').sum()
-        time_range = pd.date_range(start=date_from, end=date_to, freq='H')
+        time_range = pd.date_range(start=date_range['from'], end=date_range['to'], freq='H')
         df = df.reindex(time_range, fill_value=0)
         df = df.reset_index(names='fromTime')
 
@@ -136,6 +137,11 @@ def interpolate(df: pd.DataFrame, date_from: datetime, date_to: datetime, reinde
         fig.show()
 
     return df
+
+
+def interpolate_date_range(df: pl.DataFrame):
+    return {'from':df.select('fromTime').min().item(), 'to': df.select('fromTime').max().item()}
+
 
 # return all AMI points considered a prosumer
 def get_prosumers(df:pl.DataFrame)->pl.DataFrame:
@@ -158,13 +164,12 @@ def self_consumption(prosumers: dict) ->pd.DataFrame:
     df_avg_prod = prosumers['producer'].sort(by=['fromTime']).groupby_dynamic('fromTime', every='1h').agg(pl.col('value').mean())
 
     # retrieve date range
-    date_from = df_avg_load.select('fromTime').min().item()
-    date_to =df_avg_load.select('fromTime').max().item()
+    range = interpolate_date_range(df_avg_load)
 
     df_self_consumption = pd.DataFrame()
     # do interpolation of series
-    df_interp_load = interpolate(df=df_avg_load.to_pandas(), date_from=date_from, date_to=date_to, reindex=False)
-    df_interp_prod = interpolate(df=df_avg_prod.to_pandas(), date_from=date_from, date_to=date_to, reindex=True)
+    df_interp_load = interpolate(df=df_avg_load.to_pandas(), date_range=range, zero_padding=False)
+    df_interp_prod = interpolate(df=df_avg_prod.to_pandas(), date_range=range, zero_padding=True)
 
     # solve for self consumption
     df_self_consumption = df_interp_load.rename(columns={'value': 'consumption'})
@@ -176,13 +181,19 @@ def self_consumption(prosumers: dict) ->pd.DataFrame:
     return df_self_consumption
 
 
-# use the penetration and number of AMI's to rank neihborhoods
+# use number of production points to rank neighborhoods
 def metric_1(df: pl.DataFrame) -> pl.DataFrame:
-    return (df.with_columns(df.select(['ami_cnt', 'penetration'])
-                            .apply(lambda x: x[0] * x[1] / 100))
+    return (df.with_columns(df.select(['prod_cnt'])
+                            .apply(lambda x: x[0])).with_columns(pl.col('map')/pl.col('map').max())
             .rename({'map': 'metric_1'})
-            .select(['topology', 'metric_1'])
             .sort('metric_1', descending=True))
+
+# rank based on max net production with 50% penetration
+def metric_2(df: pl.DataFrame) -> pl.DataFrame:
+    return (df.with_columns(df.select(['max_production_kWh', 'max_consumption_kWh'])
+                            .apply(lambda x: (x[0]*0.5 - x[1]) / 100)).with_columns(pl.col('map')/pl.col('map').max())
+            .rename({'map': 'metric_2'})
+            .sort('metric_2', descending=True))
 
 def statistics(src_path: str, dst_path: str, date_from: datetime, date_to: datetime, name: str='statistics'):
 
@@ -218,8 +229,6 @@ def statistics(src_path: str, dst_path: str, date_from: datetime, date_to: datet
 
         # time slicing
         df = df.with_columns( pl.col("fromTime").str.to_datetime(format=time_format),pl.col("toTime").str.to_datetime(format=time_format) ).sort(by="fromTime")
-        #date_from = max(df.select('fromTime').min().item(), date_from)
-        #date_to = min(df.select('fromTime').max().item(), date_to)
         df = df.filter(pl.col("fromTime").is_between(date_from, date_to)).sort(by='fromTime')
 
         if stats.prod_cnt:
@@ -240,6 +249,12 @@ def statistics(src_path: str, dst_path: str, date_from: datetime, date_to: datet
 
     df_stats.write_parquet(dst_path)
     print(f"Complete. Save statistics to {dst_path}")
+
+
+
+
+
+
 
 
 
