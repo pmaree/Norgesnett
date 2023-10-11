@@ -175,6 +175,15 @@ def self_consumption(prosumers: dict) ->pd.DataFrame:
     # return self consumption
     return df_self_consumption
 
+
+# use the penetration and number of AMI's to rank neihborhoods
+def metric_1(df: pl.DataFrame) -> pl.DataFrame:
+    return (df.with_columns(df.select(['ami_cnt', 'penetration'])
+                            .apply(lambda x: x[0] * x[1] / 100))
+            .rename({'map': 'metric_1'})
+            .select(['topology', 'metric_1'])
+            .sort('metric_1', descending=True))
+
 def statistics(src_path: str, dst_path: str, date_from: datetime, date_to: datetime, name: str='statistics'):
 
     dst_path = os.path.join(dst_path, name)
@@ -183,8 +192,8 @@ def statistics(src_path: str, dst_path: str, date_from: datetime, date_to: datet
             cfg.set_tbl_cols(-1)
             cfg.set_tbl_rows(50)
             cfg.set_tbl_width_chars(width=1500)
-            df = pl.read_parquet(dst_path).sort(by='penetration', descending=True)
-            print('')
+
+            print(f"Neighborhoods ranked in metric 1: {metric_1(pl.read_parquet(dst_path).sort(by='penetration', descending=True)).head(5)}")
 
         return
 
