@@ -126,18 +126,3 @@ def raw_to_bronze(src_path: str, dst_path: str):
                     log.info(f"[{index}] Skipped processing measurements for {topology_name} with {df_topology.shape[0]}")
 
 
-def bronze_to_silver(src_path: str, dst_path: str, date_from: datetime, date_to: datetime):
-    file_list = os.listdir(src_path)
-    for file_name in file_list:
-        # read parquet
-        file_path = os.path.join(src_path, file_name)
-        df = pl.read_parquet(file_path)
-
-        # capture data range of interest
-        df = df.with_columns( pl.col("fromTime").str.to_datetime(format=time_format))
-        df = df.with_columns( pl.col("toTime").str.to_datetime(format=time_format))
-        df = df.filter(pl.col("fromTime").is_between(date_from, date_to)).sort(by='fromTime')
-
-        # split data into respective Pload, Pprod
-        df_load = df.filter(pl.col('type')==1)
-        df_prod = df.filter(pl.col('type')==3)
