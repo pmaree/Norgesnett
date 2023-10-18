@@ -157,4 +157,5 @@ def plot_processed():
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8080, threaded=True, debug=True)
+    #prepare_features(date_from='2023-03-01T00:00:00', date_to='2023-09-01T01:00:00')
 

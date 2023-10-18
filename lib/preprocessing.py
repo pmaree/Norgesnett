@@ -71,6 +71,9 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
         def get_data_to(df: pl.DataFrame)->pl.Utf8:
             return df.select('toTime').max().item().isoformat()
 
+        def get_sample_cnt(df: pl.DataFrame)->pl.Int64:
+            return df.shape[0]
+
         def get_ami_cnt(df: pl.DataFrame)->pl.Int64:
             return df.n_unique('meteringPointId')
 
@@ -81,23 +84,23 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
             return df.filter(pl.col('p_prod_kwh')>0).n_unique(subset='meteringPointId')
 
         def get_res_pen(df: pl.DataFrame)->pl.Float64:
-            return get_ami_prod_cnt(df)/max(1,get_ami_load_cnt(df))*100
+            return round(get_ami_prod_cnt(df)/max(1,get_ami_load_cnt(df))*100,1)
 
         def get_p_load_max(df: pl.DataFrame)->pl.Float64:
             load_max = df.filter(pl.col('p_load_kwh')>0).select(pl.col('p_load_kwh')).max().item()
-            return float() if load_max is None else load_max
+            return float() if  load_max is None else round(load_max,1)
 
         def get_p_prod_max(df: pl.DataFrame)->pl.Float64:
-            prod_max = df.filter(pl.col('p_prod_kwh')>0).select(pl.col('p_prod_kwh')).max().item()
-            return float() if prod_max is None else prod_max
+            prod_max =df.filter(pl.col('p_prod_kwh')>0).select(pl.col('p_prod_kwh')).max().item()
+            return float() if  prod_max is None else round(prod_max,1)
 
         def get_net_export_max(df: pl.DataFrame)->pl.Float64:
             export_max = df.select((pl.col('p_prod_kwh')-pl.col('p_load_kwh'))).max().item()
-            return float() if export_max is None else export_max
+            return float() if  export_max is None else round(export_max,1)
 
         def get_net_export_min(df: pl.DataFrame)->pl.Float64:
-            export_min = df.select((pl.col('p_prod_kwh')-pl.col('p_load_kwh'))).min().item()
-            return float() if export_min is None else export_min
+            export_min = round(df.select((pl.col('p_prod_kwh')-pl.col('p_load_kwh'))).min().item(),1)
+            return float() if  export_min is None else round(export_min,1)
 
         def get_agg_avg_features(df:pl.DataFrame, every='24h'):
             df = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every=every).agg(
@@ -105,9 +108,9 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                 (pl.col('p_prod_kwh').sum()).alias('p_prod_nb_avg_kwh'),
                 ((pl.col('p_prod_kwh')-pl.col('p_load_kwh')).sum()).alias('p_export_nb_avg_kwh'),
             )
-            return {'p_load_nb_max_24h_agg_kwh': df.select('p_load_nb_avg_kwh').max().item(),
-                    'p_prod_nb_max_24h_agg_kwh': df.select('p_prod_nb_avg_kwh').max().item(),
-                    'p_gexp_nb_max_24h_agg_kwh': df.select('p_export_nb_avg_kwh').max().item()}
+            return {'p_load_nb_max_24h_agg_kwh': round(df.select('p_load_nb_avg_kwh').max().item(),1),
+                    'p_prod_nb_max_24h_agg_kwh': round(df.select('p_prod_nb_avg_kwh').max().item(),1),
+                    'p_gexp_nb_max_24h_agg_kwh': round(df.select('p_export_nb_avg_kwh').max().item(),1)}
 
 
         # compile features list
@@ -115,6 +118,7 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
             {**{'topology': get_topology(df),
                 'date_from': get_data_from(df),
                 'date_to': get_data_to(df),
+                'sample_cnt':get_sample_cnt(df),
                 'ami_cnt': get_ami_cnt(df),
                 'ami_load_cnt': get_ami_load_cnt(df),
                 'ami_prod_cnt': get_ami_prod_cnt(df),
