@@ -127,7 +127,7 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
         def get_ami_prod_cnt(df: pl.DataFrame)->pl.Int64:
             return df.filter(pl.col('p_prod_kwh')>0).n_unique(subset='meteringPointId')
 
-        def get_res_pen(df: pl.DataFrame)->pl.Float64:
+        def get_plusskunder_ratio(df: pl.DataFrame)->pl.Float64:
             return round(get_ami_prod_cnt(df)/max(1,get_ami_load_cnt(df))*100,1)
 
         def get_p_load_max(df: pl.DataFrame)->pl.Float64:
@@ -146,18 +146,39 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
             export_min = round(df.select((pl.col('p_prod_kwh')-pl.col('p_load_kwh'))).min().item(),1)
             return float() if  export_min is None else round(export_min,1)
 
-        def get_agg_avg_features(df:pl.DataFrame, every='24h'):
-            df = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every=every).agg(
-                (pl.col('p_load_kwh').sum()).alias('p_load_nb_avg_kwh'),
-                (pl.col('p_prod_kwh').sum()).alias('p_prod_nb_avg_kwh'),
-                ((pl.col('p_prod_kwh')-pl.col('p_load_kwh')).sum()).alias('p_export_nb_avg_kwh'),
-            )
-            return {'p_load_nb_max_24h_agg_kwh': round(df.select('p_load_nb_avg_kwh').max().item(),1),
-                    'p_prod_nb_max_24h_agg_kwh': round(df.select('p_prod_nb_avg_kwh').max().item(),1),
-                    'p_gexp_nb_max_24h_agg_kwh': round(df.select('p_export_nb_avg_kwh').max().item(),1)}
+        def get_agg_avg_features(df:pl.DataFrame, every):
 
+            df = df.with_columns((pl.col('p_prod_kwh')-pl.col('p_load_kwh')).alias('p_pros_kwh')) # Get net export for each AMI at each time
+            df_ = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every=every) # Group all AMI's to same time for neighborhood
+
+            df_ = df_.agg((pl.col('p_pros_kwh').sum()).alias('p_nb_pros_kwh'),
+                         (pl.col('p_prod_kwh').sum()).alias('p_nb_prod_kwh'),
+                         (pl.col('p_load_kwh').sum()).alias('p_nb_load_kwh'))
+
+            df_ = df_.select(pl.all(),
+                      pl.when(pl.col('p_nb_pros_kwh')>0)
+                      .then(pl.col('p_nb_pros_kwh'))
+                      .otherwise(pl.lit(0))
+                      .alias('net_nb_export_kwh'))
+            df_ = df_.select(pl.all(),
+                       pl.when(pl.col('p_nb_pros_kwh')>0)
+                       .then(pl.col('p_nb_prod_kwh')-pl.col('p_nb_pros_kwh'))
+                       .otherwise(pl.col('p_nb_prod_kwh'))
+                       .alias('net_nb_self_consumption_kwh'))
+
+                    # average aggregated production versus consumption for neighborhood
+            return {f"p_nb_pros_kwh_avg_{every}_agg": round(df_.select('p_nb_pros_kwh').mean().item(),1),
+                    # maximum aggregated production for neighborhood
+                    f"p_nb_prod_kwh_max_{every}_agg": round(df_.select('p_nb_prod_kwh').max().item(),1),
+                    # maximum aggregated consumption for neighborhood
+                    f"p_nb_load_kwh_max_{every}_agg": round(df_.select('p_nb_load_kwh').max().item(),1),
+                    # maximum aggregated net grid export for neighborhood
+                    f"net_nb_export_kwh_max_{every}_agg": round(df_.select('net_nb_export_kwh').max().item(),1),
+                    # maximum aggregated self consumption for grid
+                    f"net_nb_self_consumption_kwh_max_{every}_agg": round(df_.select('net_nb_self_consumption_kwh').max().item(),1)}
 
         # compile features list
+        aggregate_every = '1h'
         df_feature = pl.DataFrame(
             {**{'topology': get_topology(df),
                 'coordinate': get_coordinate(df, df_usage_points),
@@ -167,12 +188,12 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                 'ami_cnt': get_ami_cnt(df),
                 'ami_load_cnt': get_ami_load_cnt(df),
                 'ami_prod_cnt': get_ami_prod_cnt(df),
-                'res_pen_pers': get_res_pen(df),
+                'plusk_ratio': get_plusskunder_ratio(df),
                 'p_load_max': get_p_load_max(df),
                 'p_prod_max': get_p_prod_max(df),
                 'net_export_max': get_net_export_max(df),
                 'net_export_min': get_net_export_min(df)},
-               **get_agg_avg_features(df)
+               **get_agg_avg_features(df, every=aggregate_every)
              })
 
         if verbose:

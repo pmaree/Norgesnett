@@ -9,3 +9,6 @@ pyarrow==13.0.0
 Flask==3.0.0
 plotly-express==0.4.1
 screeninfo==0.8.1
+hvplot==0.9.0
+jupyterlab==4.0.7
+notebook==7.0.6

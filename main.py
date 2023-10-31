@@ -16,6 +16,7 @@ time_format = '%Y-%m-%dT%H:%M:%S'
 
 app = Flask(__name__,template_folder='template')
 
+# http://0.0.0.0:9000/features?sort_by=ami_prod_cnt&descending=1&show_n=100
 @app.route('/features')
 def sort_features():
     path = PATH+f"/data/silver/"
@@ -156,6 +157,6 @@ def plot_processed():
 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=8080, threaded=True, debug=True)
+    app.run(host='0.0.0.0', port=9000, threaded=True, debug=True)
     
 
