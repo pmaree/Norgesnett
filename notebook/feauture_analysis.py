@@ -133,14 +133,65 @@ def reduction_path_2(df):
     n_unique = df.n_unique(subset='topology')
     print(f"Unique topologies for neighborhoods on r6 and r7 : {n_unique}")
 
+def reduction_path_3(df):
+
+    def print_rule(df, nr):
+        print(f"Rule {nr}: Number of neighborhoods = {df.shape[0]}")
+        print(f"Rule {nr}: AMI min = {df.select(pl.col('ami_cnt')).min().item()}")
+        print(f"Rule {nr}: AMI max = {df.select(pl.col('ami_cnt')).max().item()}")
+        print(f"Rule {nr}: nbhd. Agg Prod = {df.select(pl.col('nb_prod_max')).mean().item()}")
+        print(f"Rule {nr}: nbhd. agg ex. = {df.select(pl.col('nb_ex_max')).mean().item()}")
+
+    # Rule 1
+    df_r1 = df.filter(pl.col('ami_prod_max')>15).filter(pl.col('ami_cnt')>1)
+    print_rule(df_r1, 1)
+
+    # Rule 2
+    pv_penetration_limit = 0.4
+    df_r2 = df.filter(pl.col('nb_prod_max')/pl.col('nb_load_max')>pv_penetration_limit)
+    print_rule(df_r2, 2)
+
+    # Rule 3
+    peak_load_per_house_kwh = 3
+    pv_penetration_limit = 0.4
+    PF = 0.85
+    DF = 1.4
+    df_r3 = df.with_columns((pl.col('ami_cnt')*peak_load_per_house_kwh/PF/DF).alias('peak_tf_load_kwh'))\
+        .filter(pl.col('nb_prod_max')/pl.col('peak_tf_load_kwh')>pv_penetration_limit)\
+        .drop('peak_tf_load_kwh')
+    print_rule(df_r3, 3)
+
+    df_ = pl.concat([df_r1,df_r2,df_r3])
+    print(f"Rule 1-3 identified {df_.n_unique('topology')} topologies from {df_.shape[0]}")
+    return df_.unique(subset='topology')
+
+def reduction_path_4(df):
+    topologies = {'093':'S_1557714_T_1557719',
+                  '273':'S_1134740_T_1192382',
+                  '365H': 'S_1134814_T_1134470',
+                  '56': 'S_1134691_T_1192378',
+                  '65H':'S_17279_T_1513'}
+    df_ = pl.DataFrame(schema=df.schema)
+    for key, value in topologies.items():
+        df_ = pl.concat([df_, df.filter(pl.col('topology')==value)])
+    print_df(df_)
+    return df_
+
+
 if __name__ == "__main__":
     # load features table
     df = pl.read_parquet(os.path.join(path,'features'))
-    reduction_path_1(df)
-    reduction_path_2(df)
+    #reduction_path_1(df)
+    #reduction_path_2(df)
+    df3 = reduction_path_3(df)
+    df4 =reduction_path_4(df)
 
+    topologies = df3.select('topology').to_series().to_list()
+    for topology in df4.select('topology').to_series().to_list():
+        if topology in topologies:
+            print(f"Mutual topology selection found: {topology}")
 
-    #args = {'r1_lb':0, 'r2_lb':20, 'r3_lb':1, 'r4_lb':10, 'r5_lb':10}
+    args = {'r1_lb':0, 'r2_lb':20, 'r3_lb':1, 'r4_lb':10, 'r5_lb':10}
     #scenario(df=df, scenario_args=args)
 
 

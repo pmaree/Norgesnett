@@ -1,12 +1,12 @@
-import os
+
 from flask import Flask, request, render_template
 import polars as pl
+import os
 
 from lib import Logging
 import plotly.express as px
 
 from lib.etl import etl_bronze_to_silver
-from lib.preprocessing import prepare_features
 
 log = Logging()
 
@@ -37,13 +37,13 @@ def set_px(fig_cnt:int=1):
 
 
 # plot the raw data for visual inspection
-# http://0.0.0.0:8080/plot/raw?topology=S_1364278_T_1364283&ami=707057500075560028
+# http://0.0.0.0:9000/plot/raw?topology=S_17279_T_1513&ami=707057500075560028
 @app.route('/plot/raw')
 def plot_raw_ami():
     path = PATH+f"/data/bronze/measurements"
 
-    topology = request.args.get('topology', default='', type=str)
-    ami = request.args.get('ami', default='', type=str)
+    topology = request.args.get('topology', type=str)
+    ami = request.args.get('ami', type=str)
 
     for file_name in os.listdir(path):
         if topology in file_name.split(sep='_2023')[0]:
@@ -80,12 +80,14 @@ def plot_raw_ami():
         return render_template('raw.html', plot_div1=plot_div1)
 
 # Plot the processed time series for aggegrgaed and average production and consumption for a neighborhood
-# http://0.0.0.0:8080/plot/processed?topology=S_1364278_T_1364283&every=24h
+# http://0.0.0.0:9000/plot/processed?topology=S_1364278_T_1364283&every=24h
 @app.route('/plot/processed')
 def plot_processed():
     silver_path = PATH+f"/data/silver/"
 
-    topology = request.args.get('topology', default='', type=str)
+    topology = request.args.get('topology', type=str)
+    ami = request.args.get('ami', type=str)
+
     every = request.args.get('every', default='1h', type=str)
     date_from = request.args.get('date_from', default='2023-03-01T00:00:00', type=str)
     date_to =  request.args.get('date_to', default='2023-09-01T00:00:00', type=str)
@@ -95,6 +97,12 @@ def plot_processed():
         df = pl.read_parquet(os.path.join(silver_path, topology))
     else:
         df = etl_bronze_to_silver(topology,date_from=date_from,date_to=date_to)
+
+    unique_ami = df.unique(subset='meteringPointId').select(pl.col('meteringPointId'))
+    if (ami is not None) and (ami not in unique_ami.to_series().to_list()):
+        return unique_ami.to_pandas().to_html()
+    else:
+        df = df.filter(pl.col('meteringPointId')==ami)
 
     # total production and consumption over cluster of prosumers grouped by hourly timestamp
     ami_cnt = df.n_unique(subset='meteringPointId')
@@ -157,6 +165,6 @@ def plot_processed():
 
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=9000, threaded=True, debug=True)
+    app.run(host='0.0.0.0', port=9000, debug=True)
     
 

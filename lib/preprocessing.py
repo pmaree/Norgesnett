@@ -140,11 +140,11 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
 
         def get_net_export_max(df: pl.DataFrame)->pl.Float64:
             export_max = df.select((pl.col('p_prod_kwh')-pl.col('p_load_kwh'))).max().item()
-            return float() if  export_max is None else round(export_max,1)
+            return float() if export_max is None else round(export_max,1)
 
         def get_net_export_min(df: pl.DataFrame)->pl.Float64:
             export_min = round(df.select((pl.col('p_prod_kwh')-pl.col('p_load_kwh'))).min().item(),1)
-            return float() if  export_min is None else round(export_min,1)
+            return float() if export_min is None else round(export_min,1)
 
         def get_agg_avg_features(df:pl.DataFrame, every):
 
@@ -167,15 +167,15 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                        .alias('net_nb_self_consumption_kwh'))
 
                     # average aggregated production versus consumption for neighborhood
-            return {f"p_nb_pros_kwh_avg_{every}_agg": round(df_.select('p_nb_pros_kwh').mean().item(),1),
+            return {f"nb_pros_avg": round(df_.select('p_nb_pros_kwh').mean().item(),1),
                     # maximum aggregated production for neighborhood
-                    f"p_nb_prod_kwh_max_{every}_agg": round(df_.select('p_nb_prod_kwh').max().item(),1),
+                    f"nb_prod_max": round(df_.select('p_nb_prod_kwh').max().item(),1),
                     # maximum aggregated consumption for neighborhood
-                    f"p_nb_load_kwh_max_{every}_agg": round(df_.select('p_nb_load_kwh').max().item(),1),
+                    f"nb_load_max": round(df_.select('p_nb_load_kwh').max().item(),1),
                     # maximum aggregated net grid export for neighborhood
-                    f"net_nb_export_kwh_max_{every}_agg": round(df_.select('net_nb_export_kwh').max().item(),1),
+                    f"nb_ex_max": round(df_.select('net_nb_export_kwh').max().item(),1),
                     # maximum aggregated self consumption for grid
-                    f"net_nb_self_consumption_kwh_max_{every}_agg": round(df_.select('net_nb_self_consumption_kwh').max().item(),1)}
+                    f"nb_sc_max": round(df_.select('net_nb_self_consumption_kwh').max().item(),1)}
 
         # compile features list
         aggregate_every = '1h'
@@ -188,11 +188,11 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                 'ami_cnt': get_ami_cnt(df),
                 'ami_load_cnt': get_ami_load_cnt(df),
                 'ami_prod_cnt': get_ami_prod_cnt(df),
-                'plusk_ratio': get_plusskunder_ratio(df),
-                'p_load_max': get_p_load_max(df),
-                'p_prod_max': get_p_prod_max(df),
-                'net_export_max': get_net_export_max(df),
-                'net_export_min': get_net_export_min(df)},
+                'ami_lp_ratio': get_plusskunder_ratio(df),
+                'ami_load_max': get_p_load_max(df),
+                'ami_prod_max': get_p_prod_max(df),
+                'ami_ex_max': get_net_export_max(df),
+                'ami_ex_min': get_net_export_min(df)},
                **get_agg_avg_features(df, every=aggregate_every)
              })
 
@@ -210,6 +210,8 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
     df_features.write_parquet(os.path.join(silver_path,features_name))
 
 
+
 if __name__ == "__main__":
     #prepare_usagepoints()
+    #
     prepare_features(date_from='2023-03-01T00:00:00', date_to='2023-09-01T01:00:00')
