@@ -1,10 +1,13 @@
-
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template, redirect
 import polars as pl
+import pandas as pd
 import os
 
 from lib import Logging
+
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from lib.etl import etl_bronze_to_silver
 
@@ -68,7 +71,7 @@ def plot_raw_ami():
             fig1.add_scatter(x=df_p_prod['fromTime'], y=df_p_prod['value'])
             fig1.data[1].showlegend = True
             fig1.data[1].name = 'Production'
-        fig1.update_yaxes(title_text='kWh')
+        fig1.update_yaxes(title_text='kWh/h')
         fig1.update_xaxes(title_text='time')
         fig1.update_layout(
             title=dict(text=f"Time series for AMI={ami}, Topology={topology}", x=0.5, y=0.95, font=dict(size=18, color='black'), xanchor='center')
@@ -80,7 +83,7 @@ def plot_raw_ami():
         return render_template('raw.html', plot_div1=plot_div1)
 
 # Plot the processed time series for aggegrgaed and average production and consumption for a neighborhood
-# http://0.0.0.0:9000/plot/processed?topology=S_1364278_T_1364283&every=24h
+# http://0.0.0.0:9000/plot/processed?topology=S_1262876_T_1262881&every=1h
 @app.route('/plot/processed')
 def plot_processed():
     silver_path = PATH+f"/data/silver/"
@@ -99,10 +102,12 @@ def plot_processed():
         df = etl_bronze_to_silver(topology,date_from=date_from,date_to=date_to)
 
     unique_ami = df.unique(subset='meteringPointId').select(pl.col('meteringPointId'))
-    if (ami is not None) and (ami not in unique_ami.to_series().to_list()):
-        return unique_ami.to_pandas().to_html()
-    else:
-        df = df.filter(pl.col('meteringPointId')==ami)
+    if ami is not None:
+        if ami not in unique_ami.to_series().to_list():
+            return unique_ami.to_pandas().to_html()
+        else:
+            df = df.filter(pl.col('meteringPointId')==ami)
+
 
     # total production and consumption over cluster of prosumers grouped by hourly timestamp
     ami_cnt = df.n_unique(subset='meteringPointId')
@@ -124,7 +129,7 @@ def plot_processed():
     fig1.add_scatter(x=df['fromTime'], y=df['p_prod_sum_kwh'])
     fig1.add_scatter(x=df['fromTime'], y=df['p_export_sum_kwh'])
 
-    fig1.update_yaxes(title_text='kWh')
+    fig1.update_yaxes(title_text='kWh/{every}')
     fig1.update_xaxes(title_text='time')
     fig1.update_layout(
         title=dict(text=f"Aggregated profiles for topology {topology} (aggregation period={every})", x=0.5, y=0.95, font=dict(size=18, color='black'), xanchor='center')
@@ -143,7 +148,7 @@ def plot_processed():
     fig2.add_scatter(x=df['fromTime'], y=df['p_prod_avg_kwh'])
     fig2.add_scatter(x=df['fromTime'], y=df['p_export_avg_kwh'])
 
-    fig2.update_yaxes(title_text='kWh')
+    fig2.update_yaxes(title_text='kWh/{every}')
     fig2.update_xaxes(title_text='time')
     fig2.update_layout(
         title=dict(text=f"Averaged profiles for topology {topology} (averaged over {ami_cnt} AMI's)", x=0.5, y=0.95, font=dict(size=18, color='black'), xanchor='center')
@@ -162,6 +167,76 @@ def plot_processed():
     plot_div2 = fig2.to_html(full_html=False)
 
     return render_template('processed.html', plot_div1=plot_div1, plot_div2=plot_div2)
+
+# Plot the processed time series for aggegrgaed and average production and consumption for a neighborhood
+# http://0.0.0.0:9000/plot/duckcurve?topology=S_1262876_T_1262881
+@app.route('/plot/duckcurve')
+def plot_duckcurve():
+
+    path = PATH+f"/data/silver/"
+
+    topology = request.args.get('topology', type=str)
+    if (topology is None) or (topology == ''):
+        return redirect('/features?sort_by=ami_prod_cnt&descending=1&show_n=200')
+
+    df = pl.read_parquet(os.path.join(path, topology))
+    load_cnt = df.filter(pl.col('p_load_kwh')>0).n_unique('meteringPointId')
+    prod_cnt = df.filter(pl.col('p_prod_kwh')>0).n_unique('meteringPointId')
+
+    ami_cnt = df.n_unique('meteringPointId')
+    # group AMI's for neighborhood over {every} and solve for total of group
+    every = '1h'
+    df = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every=every) \
+        .agg(pl.col('p_load_kwh').sum().alias(f"nb_load_{every}"),
+             pl.col('p_prod_kwh').sum().alias(f"nb_prod_{every}")) \
+        .with_columns((pl.col('fromTime').map_elements(lambda datetime: datetime.hour)).alias('hour'))
+
+    df_=df.group_by(by='hour').agg(pl.col(f"nb_load_{every}").mean().alias(f"nb_load_{every}_mean"),
+                                   pl.col(f"nb_prod_{every}").mean().alias(f"nb_prod_{every}_mean")
+                                   ).sort(by='hour')
+
+
+    # Create figure with secondary y-axis
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    # Add traces
+
+    fig.add_trace(
+        go.Scatter(x=df_['hour'], y=df_[f"nb_load_{every}_mean"], name=f"Load (#AMI={load_cnt})", line=dict(color="#FFC000")),
+        secondary_y=False,
+    )
+
+    fig.add_trace(
+        go.Scatter(x=df_['hour'], y=df_[f"nb_prod_{every}_mean"], name=f"Prod (#AMI={prod_cnt})", line=dict(color="#006400")),
+        secondary_y=True,
+    )
+
+    # Add figure title
+    fig.update_layout(
+        title=dict(text=f"Hourly aggregated profiles for <{topology}>", xanchor='left'),
+        width=1920*.9,
+        height=1080*.9,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01
+        ),
+        font=dict(
+            family="Courier New, monospace",
+            size=18,
+            color="#000000"
+        )
+    )
+
+    # Set x-axis title
+    fig.update_xaxes(title_text="time [h]")
+
+    # Set y-axes titles
+    fig.update_yaxes(title_text="Avg. Nhbd. Load kWh/h", secondary_y=False)
+    fig.update_yaxes(title_text="Avg. Nhbd. Prod kWh/h", secondary_y=True)
+
+    return render_template('raw.html', plot_div1=fig.to_html(full_html=False))
 
 
 if __name__ == "__main__":

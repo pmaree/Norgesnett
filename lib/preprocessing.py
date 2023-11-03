@@ -146,7 +146,7 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
             export_min = round(df.select((pl.col('p_prod_kwh')-pl.col('p_load_kwh'))).min().item(),1)
             return float() if export_min is None else round(export_min,1)
 
-        def get_agg_avg_features(df:pl.DataFrame, every):
+        def get_agg_avg_features(df:pl.DataFrame, every: str='1h'):
 
             df = df.with_columns((pl.col('p_prod_kwh')-pl.col('p_load_kwh')).alias('p_pros_kwh')) # Get net export for each AMI at each time
             df_ = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every=every) # Group all AMI's to same time for neighborhood
@@ -177,6 +177,35 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                     # maximum aggregated self consumption for grid
                     f"nb_sc_max": round(df_.select('net_nb_self_consumption_kwh').max().item(),1)}
 
+        def get_agg_duckcurve_profiles(df:pl.DataFrame):
+
+            # group AMI's for neighborhood over {every} and solve for total of group
+            df = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every='1h') \
+                .agg(pl.col('p_load_kwh').sum().alias(f"nb_load_"),
+                     pl.col('p_prod_kwh').sum().alias(f"nb_prod")) \
+                .with_columns((pl.col('fromTime').map_elements(lambda datetime: datetime.hour)).alias('hour'))
+
+            # group by the 1h over entry nb and solve for average in the aggregated interval
+            df_=df.group_by(by='hour').agg(pl.col(f"nb_load").mean().alias(f"nb_load_mean"),
+                                           pl.col(f"nb_prod").mean().alias(f"nb_prod_mean")
+                                           ).sort(by='hour')
+
+            # get the maximum load hour and also the value
+            idx = df_.select(pl.col('nb_load_mean')).to_series().arg_max()
+            load_max_time =df_.select(pl.col('hour'))[idx].item()
+            load_max_val = df_.select(pl.col('nb_load_mean'))[idx].item()
+
+            # get the maximum prod hour and also the value
+            idx = df_.select(pl.col('nb_prod_mean')).to_series().arg_max()
+            prod_max_time =df_.select(pl.col('hour'))[idx].item()
+            prod_max_val = df_.select(pl.col('nb_prod_mean'))[idx].item()
+
+            return {'nb_dcl_h': load_max_time,
+                    'nb_dcl_v': load_max_val,
+                    'nb_dcp_h': prod_max_time,
+                    'nb_dcp_v': prod_max_val}
+
+
         # compile features list
         aggregate_every = '1h'
         df_feature = pl.DataFrame(
@@ -193,7 +222,8 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                 'ami_prod_max': get_p_prod_max(df),
                 'ami_ex_max': get_net_export_max(df),
                 'ami_ex_min': get_net_export_min(df)},
-               **get_agg_avg_features(df, every=aggregate_every)
+               **get_agg_avg_features(df, every=aggregate_every),
+               **get_agg_duckcurve_profiles(df)
              })
 
         if verbose:

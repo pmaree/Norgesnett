@@ -1,10 +1,9 @@
 import numpy as np
 import polars as pl
-import os
+import os, json
 
 PATH = os.getcwd()
 path = f"{PATH}/../data/silver/"
-print(path)
 
 # Filter neighborhoods on plusskunde penetration
 def r1_filter_penetration(df: pl.DataFrame, lower_limit: float):
@@ -143,18 +142,18 @@ def reduction_path_3(df):
         print(f"Rule {nr}: nbhd. agg ex. = {df.select(pl.col('nb_ex_max')).mean().item()}")
 
     # Rule 1
-    df_r1 = df.filter(pl.col('ami_prod_max')>15).filter(pl.col('ami_cnt')>1)
+    df_r1 = df.filter(pl.col('ami_prod_max')>9).filter(pl.col('ami_cnt')>1)
     print_rule(df_r1, 1)
 
     # Rule 2
-    pv_penetration_limit = 0.4
+    pv_penetration_limit = 0.35
     df_r2 = df.filter(pl.col('nb_prod_max')/pl.col('nb_load_max')>pv_penetration_limit)
     print_rule(df_r2, 2)
 
     # Rule 3
     peak_load_per_house_kwh = 3
-    pv_penetration_limit = 0.4
-    PF = 0.85
+    pv_penetration_limit = 0.35
+    PF = 0.95
     DF = 1.4
     df_r3 = df.with_columns((pl.col('ami_cnt')*peak_load_per_house_kwh/PF/DF).alias('peak_tf_load_kwh'))\
         .filter(pl.col('nb_prod_max')/pl.col('peak_tf_load_kwh')>pv_penetration_limit)\
@@ -177,22 +176,36 @@ def reduction_path_4(df):
     print_df(df_)
     return df_
 
+def assoc_ami_list(df):
+    path = f"{PATH}/../data/silver/"
+    topology_family = {}
+    for topology in df.select(pl.col('topology')).to_series().to_list():
+        df_ = pl.read_parquet(os.path.join(path, topology))
+        topology_family[topology] = df_.unique(subset='meteringPointId').select('meteringPointId').to_series().to_list()
+    return topology_family
+
 
 if __name__ == "__main__":
     # load features table
     df = pl.read_parquet(os.path.join(path,'features'))
-    #reduction_path_1(df)
-    #reduction_path_2(df)
+
+    # numericla reduction method based on AMS data
     df3 = reduction_path_3(df)
+
+    # client input on neighborhoods with issues
     df4 =reduction_path_4(df)
 
-    topologies = df3.select('topology').to_series().to_list()
-    for topology in df4.select('topology').to_series().to_list():
-        if topology in topologies:
-            print(f"Mutual topology selection found: {topology}")
+    # shortlisted neighborhoods
+    df_ = pl.concat([df3,df4]).unique(subset='topology')
 
-    args = {'r1_lb':0, 'r2_lb':20, 'r3_lb':1, 'r4_lb':10, 'r5_lb':10}
-    #scenario(df=df, scenario_args=args)
+    # get associated ami list to each topology
+    topology_family = assoc_ami_list(df_)
+    with open('topology_shortlisted.json', 'a+') as fp:
+        fp.write(json.dumps(topology_family))
+
+    #df_.select(pl.col('topology')).write_json('shortlisted_topologies')
+
+
 
 
 
