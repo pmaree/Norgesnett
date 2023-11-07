@@ -181,29 +181,38 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
 
             # group AMI's for neighborhood over {every} and solve for total of group
             df = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every='1h') \
-                .agg(pl.col('p_load_kwh').sum().alias(f"nb_load_"),
+                .agg(pl.col('p_load_kwh').sum().alias(f"nb_load"),
                      pl.col('p_prod_kwh').sum().alias(f"nb_prod")) \
                 .with_columns((pl.col('fromTime').map_elements(lambda datetime: datetime.hour)).alias('hour'))
 
             # group by the 1h over entry nb and solve for average in the aggregated interval
-            df_=df.group_by(by='hour').agg(pl.col(f"nb_load").mean().alias(f"nb_load_mean"),
-                                           pl.col(f"nb_prod").mean().alias(f"nb_prod_mean")
+            df_=df.group_by(by='hour').agg(pl.col(f"nb_load").max().alias(f"nb_load_max"),
+                                           pl.col(f"nb_prod").max().alias(f"nb_prod_max")
                                            ).sort(by='hour')
 
             # get the maximum load hour and also the value
-            idx = df_.select(pl.col('nb_load_mean')).to_series().arg_max()
+            idx = df_.select(pl.col('nb_load_max')).to_series().arg_max()
             load_max_time =df_.select(pl.col('hour'))[idx].item()
-            load_max_val = df_.select(pl.col('nb_load_mean'))[idx].item()
+            load_max_val = df_.select(pl.col('nb_load_max'))[idx].item()
+            load_avg_val = df_.select(pl.col('nb_load_max')).mean().item()
 
             # get the maximum prod hour and also the value
-            idx = df_.select(pl.col('nb_prod_mean')).to_series().arg_max()
-            prod_max_time =df_.select(pl.col('hour'))[idx].item()
-            prod_max_val = df_.select(pl.col('nb_prod_mean'))[idx].item()
+            try:
+                if df_.filter(pl.col('nb_prod_max')>0).shape[0]:
+                    idx = df_.select(pl.col('nb_prod_max')).to_series().arg_max()
+                    prod_max_time =df_.select(pl.col('hour'))[idx].item()
+                    prod_max_val = df_.select(pl.col('nb_prod_max'))[idx].item()
+                else:
+                    prod_max_time = 0
+                    prod_max_val = 0.0
+            except Exception as e:
+                print('exception')
 
-            return {'nb_dcl_h': load_max_time,
-                    'nb_dcl_v': load_max_val,
-                    'nb_dcp_h': prod_max_time,
-                    'nb_dcp_v': prod_max_val}
+            return {'nb_aggmaxl_idx': load_max_time,
+                    'nb_aggmaxl_val': load_max_val,
+                    'nb_aggavgl_val': load_avg_val,
+                    'nb_aggmaxp_idx': prod_max_time,
+                    'nb_aggmaxp_val': prod_max_val}
 
 
         # compile features list

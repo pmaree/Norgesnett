@@ -176,6 +176,30 @@ def reduction_path_4(df):
     print_df(df_)
     return df_
 
+def reduction_path_5(df):
+    df = df.filter(pl.col('ami_load_cnt')>0 ).filter(pl.col('ami_prod_cnt')>0)
+
+
+    limit_r1 = 12 # limit on the produciton range peak for neighborhood
+    limit_r2 = 0.8 # persentage how peak loads (ducks head) are over ducks back
+    limit_r3 = 1 # the misalignment of peaks in production and consumption does not help!
+
+    df_r1 = df.filter(pl.col('nb_aggmaxp_val')>limit_r1)
+    print(f"[reduction_path_5]: Rule 1 -> {df_r1.n_unique('topology')}")
+
+    df_r2 = df.filter((pl.col('nb_aggmaxl_val')-pl.col('nb_aggavgl_val'))/pl.col('nb_aggavgl_val')>limit_r2)
+    print(f"[reduction_path_5]: Rule 2 -> {df_r2.n_unique('topology')}")
+
+    df.with_columns()
+    df_r3 = df.with_columns( ((pl.col('nb_aggmaxl_idx')-pl.col('nb_aggmaxp_idx')).abs().map_elements(lambda dt: np.power(np.e,dt/24)).alias('pow_e_dt')))
+    df_r3 = df_r3.with_columns( ((pl.col('nb_aggmaxp_val')/pl.col('nb_aggmaxl_val'))*pl.col('pow_e_dt')).alias('rule_3'))
+    df_r3 = df_r3.filter( (pl.col('nb_aggmaxp_val')/pl.col('nb_aggmaxl_val'))*pl.col('pow_e_dt') > limit_r3 ).drop(columns=['pow_e_dt','rule_3'])
+    print(f"[reduction_path_5]: Rule 3 -> {df_r3.n_unique('topology')}")
+
+    df_ = pl.concat([df_r1,df_r2,df_r3])
+    print(f"[reduction_path_5]: Rule 1-3 identified {df_.n_unique('topology')} topologies from {df_.shape[0]}")
+    return df_.unique(subset='topology')
+
 def assoc_ami_list(df):
     path = f"{PATH}/../data/silver/"
     topology_family = {}
@@ -189,14 +213,20 @@ if __name__ == "__main__":
     # load features table
     df = pl.read_parquet(os.path.join(path,'features'))
 
+    df1 = reduction_path_3(df)
+
     # numericla reduction method based on AMS data
     df3 = reduction_path_3(df)
 
     # client input on neighborhoods with issues
     df4 =reduction_path_4(df)
 
+    # kill the duck curve
+    df5 = reduction_path_5(df)
+
     # shortlisted neighborhoods
-    df_ = pl.concat([df3,df4]).unique(subset='topology')
+    df_ = pl.concat([df5,df4]).unique(subset='topology')
+    df_a = pl.concat([df3,df4]).unique(subset='topology')
 
     # get associated ami list to each topology
     topology_family = assoc_ami_list(df_)

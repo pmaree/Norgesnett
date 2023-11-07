@@ -1,3 +1,4 @@
+import numpy as np
 from flask import Flask, request, render_template, redirect
 import polars as pl
 import pandas as pd
@@ -48,39 +49,42 @@ def plot_raw_ami():
     topology = request.args.get('topology', type=str)
     ami = request.args.get('ami', type=str)
 
+    if topology in ['',None]:
+        return redirect('/features?sort_by=ami_prod_cnt&descending=1&show_n=200')
+
     for file_name in os.listdir(path):
         if topology in file_name.split(sep='_2023')[0]:
             df = pl.read_parquet(os.path.join(path, file_name)).with_columns(topology = pl.lit(topology))
             break
-    if ami == '':
+
+    if ami in ['',None]:
         return df.unique(subset='meteringPointId').select('meteringPointId').to_pandas().to_html()
-    else:
 
-        df = df.filter(pl.col('meteringPointId') == ami)
+    df = df.filter(pl.col('meteringPointId') == ami)
 
-        df_p_load = df.filter(pl.col('type')==1).select(['fromTime','value','unit']).sort(by='fromTime').to_pandas()
-        df_p_prod = df.filter(pl.col('type')==3).select(['fromTime','value','unit']).sort(by='fromTime').to_pandas()
+    df_p_load = df.filter(pl.col('type')==1).select(['fromTime','value','unit']).sort(by='fromTime').to_pandas()
+    df_p_prod = df.filter(pl.col('type')==3).select(['fromTime','value','unit']).sort(by='fromTime').to_pandas()
 
-        set_px(1)
+    set_px(1)
 
-        # plot consumption
-        fig1 = px.line(x=df_p_load['fromTime'], y=-df_p_load['value'])
-        fig1.data[0].showlegend = True
-        fig1.data[0].name = 'Consumption'
-        if df_p_prod.shape[0]:
-            fig1.add_scatter(x=df_p_prod['fromTime'], y=df_p_prod['value'])
-            fig1.data[1].showlegend = True
-            fig1.data[1].name = 'Production'
-        fig1.update_yaxes(title_text='kWh/h')
-        fig1.update_xaxes(title_text='time')
-        fig1.update_layout(
-            title=dict(text=f"Time series for AMI={ami}, Topology={topology}", x=0.5, y=0.95, font=dict(size=18, color='black'), xanchor='center')
-        )
+    # plot consumption
+    fig1 = px.line(x=df_p_load['fromTime'], y=-df_p_load['value'])
+    fig1.data[0].showlegend = True
+    fig1.data[0].name = 'Consumption'
+    if df_p_prod.shape[0]:
+        fig1.add_scatter(x=df_p_prod['fromTime'], y=df_p_prod['value'])
+        fig1.data[1].showlegend = True
+        fig1.data[1].name = 'Production'
+    fig1.update_yaxes(title_text='kWh/h')
+    fig1.update_xaxes(title_text='time')
+    fig1.update_layout(
+        title=dict(text=f"Time series for AMI={ami}, Topology={topology}", x=0.5, y=0.95, font=dict(size=18, color='black'), xanchor='center')
+    )
 
-        # Render the plots
-        plot_div1 = fig1.to_html(full_html=False)
+    # Render the plots
+    plot_div1 = fig1.to_html(full_html=False)
 
-        return render_template('raw.html', plot_div1=plot_div1)
+    return render_template('raw.html', plot_div1=plot_div1)
 
 # Plot the processed time series for aggegrgaed and average production and consumption for a neighborhood
 # http://0.0.0.0:9000/plot/processed?topology=S_1262876_T_1262881&every=1h
@@ -176,7 +180,7 @@ def plot_duckcurve():
     path = PATH+f"/data/silver/"
 
     topology = request.args.get('topology', type=str)
-    if (topology is None) or (topology == ''):
+    if topology in ['', None]:
         return redirect('/features?sort_by=ami_prod_cnt&descending=1&show_n=200')
 
     df = pl.read_parquet(os.path.join(path, topology))
@@ -211,6 +215,7 @@ def plot_duckcurve():
         secondary_y=True,
     )
 
+
     # Add figure title
     fig.update_layout(
         title=dict(text=f"Hourly aggregated profiles for <{topology}>", xanchor='left'),
@@ -233,8 +238,8 @@ def plot_duckcurve():
     fig.update_xaxes(title_text="time [h]")
 
     # Set y-axes titles
-    fig.update_yaxes(title_text="Avg. Nhbd. Load kWh/h", secondary_y=False)
-    fig.update_yaxes(title_text="Avg. Nhbd. Prod kWh/h", secondary_y=True)
+    fig.update_yaxes(title_text="Avg. Nhbd. Load kWh/h", secondary_y=False, color="#FFC000")
+    fig.update_yaxes(title_text="Avg. Nhbd. Prod kWh/h", secondary_y=True, color="#006400")
 
     return render_template('raw.html', plot_div1=fig.to_html(full_html=False))
 
