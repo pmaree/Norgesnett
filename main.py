@@ -20,6 +20,7 @@ time_format = '%Y-%m-%dT%H:%M:%S'
 
 app = Flask(__name__,template_folder='template')
 
+
 # http://0.0.0.0:9000/features?sort_by=ami_prod_cnt&descending=1&show_n=100
 @app.route('/features')
 def sort_features():
@@ -31,7 +32,7 @@ def sort_features():
 
     df = pl.read_parquet(os.path.join(path,'features'))
     if sort_by is not None and sort_by in df.columns:
-        return  df.sort(by=sort_by, descending=bool(descending)).head(show_n).to_pandas().to_html()
+        return df.sort(by=sort_by, descending=bool(descending)).head(show_n).to_pandas().to_html()
     return df.head(show_n).to_pandas().to_html()
 
 
@@ -191,34 +192,135 @@ def plot_duckcurve():
     # group AMI's for neighborhood over {every} and solve for total of group
     every = '1h'
     df = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every=every) \
-        .agg(pl.col('p_load_kwh').sum().alias(f"nb_load_{every}"),
-             pl.col('p_prod_kwh').sum().alias(f"nb_prod_{every}")) \
+        .agg(pl.col('p_load_kwh').sum().alias('nb_load'),
+             pl.col('p_prod_kwh').sum().alias('nb_prod')) \
         .with_columns((pl.col('fromTime').map_elements(lambda datetime: datetime.hour)).alias('hour'))
 
-    df_=df.group_by(by='hour').agg(pl.col(f"nb_load_{every}").mean().alias(f"nb_load_{every}_mean"),
-                                   pl.col(f"nb_prod_{every}").mean().alias(f"nb_prod_{every}_mean")
+    df_=df.group_by(by='hour').agg(pl.col('nb_load').max().alias('nb_load_max'),
+                                   pl.col('nb_load').mean().alias('nb_load_avg'),
+                                   pl.col('nb_prod').max().alias('nb_prod_max')
                                    ).sort(by='hour')
 
+    df_=df_.with_columns([(pl.col('nb_load_max')-pl.col('nb_prod_max')).alias('nb_duck_max'),
+                          ((pl.col('nb_load_max')-pl.col('nb_prod_max'))/pl.col('nb_load_avg')*100).alias('nb_nduck_max')])
 
     # Create figure with secondary y-axis
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig1 = make_subplots(specs=[[{"secondary_y": True}]])
 
     # Add traces
 
-    fig.add_trace(
-        go.Scatter(x=df_['hour'], y=df_[f"nb_load_{every}_mean"], name=f"Load (#AMI={load_cnt})", line=dict(color="#FFC000")),
+    fig1.add_trace(
+        go.Scatter(x=df_['hour'], y=df_['nb_load_max'], name=f"Load (#AMI={load_cnt})", line=dict(color="#FFC000")),
         secondary_y=False,
     )
 
-    fig.add_trace(
-        go.Scatter(x=df_['hour'], y=df_[f"nb_prod_{every}_mean"], name=f"Prod (#AMI={prod_cnt})", line=dict(color="#006400")),
+    fig1.add_trace(
+        go.Scatter(x=df_['hour'], y=df_['nb_prod_max'], name=f"Prod (#AMI={prod_cnt})", line=dict(color="#006400")),
         secondary_y=True,
     )
 
 
     # Add figure title
-    fig.update_layout(
+    fig1.update_layout(
         title=dict(text=f"Hourly aggregated profiles for <{topology}>", xanchor='left'),
+        width=1920*.9,
+        height=1080*.45,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01
+        ),
+        font=dict(
+            family="Courier New, monospace",
+            size=18,
+            color="#000000"
+        )
+    )
+
+    # Set x-axis title
+    fig1.update_xaxes(title_text="time [h]")
+
+    # Set y-axes titles
+    fig1.update_yaxes(title_text="Avg. Nhbd. Load kWh/h", secondary_y=False, color="#FFC000")
+    fig1.update_yaxes(title_text="Avg. Nhbd. Prod kWh/h", secondary_y=True, color="#006400")
+
+    #
+    # Plot duck curve net and normalize
+    #
+    fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+
+    # Add traces
+
+    fig2.add_trace(
+        go.Scatter(x=df_['hour'], y=df_['nb_duck_max'], name=f"Duck", line=dict(color="#00008B")),
+        secondary_y=False,
+    )
+
+    fig2.add_trace(
+        go.Scatter(x=df_['hour'], y=df_['nb_nduck_max'], name=f"Norm. Duck (Avg. Load)", line=dict(color="#D3D3D3")),
+        secondary_y=True,
+    )
+
+    # Add figure title
+    fig2.update_layout(
+        title=dict(text=f"Hourly aggregated profiles for <{topology}>", xanchor='left'),
+        width=1920*.9,
+        height=1080*.45,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01
+        ),
+        font=dict(
+            family="Courier New, monospace",
+            size=18,
+            color="#000000"
+        )
+    )
+
+    # Set x-axis title
+    fig2.update_xaxes(title_text="time [h]")
+
+    # Set y-axes titles
+    fig2.update_yaxes(title_text="Net kWh/h", secondary_y=False, color="#000000")
+    fig2.update_yaxes(title_text="Norm. %", secondary_y=True, color="#D3D3D3")
+
+    return render_template('processed.html', plot_div1=fig1.to_html(full_html=False), plot_div2=fig2.to_html(full_html=False))
+
+@app.route('/plot/prescreening')
+def prescreening():
+    path = PATH+f"/data/silver/"
+
+    nb_aggmaxp_val = request.args.get('nb_aggmaxp_val', default=1,  type=float)
+
+    df_pl = pl.read_parquet(os.path.join(path,'features'))
+    prod_cnt_list = np.linspace(1,
+                                df_pl.select(pl.col('ami_prod_cnt').max()).item(),
+                                df_pl.select(pl.col('ami_prod_cnt').max()).item())
+
+    df_pd = pd.DataFrame(columns=['prod_ami_cnt','#Neighborhoods'])
+
+    for prod_ami_cnt in prod_cnt_list:
+            topology_cnt = df_pl.filter(pl.col('ami_prod_cnt')>=prod_ami_cnt).filter(pl.col('nb_aggmaxp_val')>=nb_aggmaxp_val).n_unique('topology')
+            df_pd.loc[len(df_pd.index)] = [prod_ami_cnt,topology_cnt]
+
+    set_px(1)
+
+    # plot consumption
+    fig = px.bar(df_pd, x='prod_ami_cnt', y='#Neighborhoods',color='#Neighborhoods')
+
+    fig.update_layout(
+        )
+
+    # Add figure title
+    fig.update_yaxes(type="log", row=1, col=1)
+
+    fig.update_layout(
+        title=f"#Neighborhood with #Plusskunder exceeding {nb_aggmaxp_val} kWh/h hourly aggregated production",
+        yaxis_title=' Number of Neighborhoods (log scale)',
+        xaxis_title=r'Number of Plusskunder',
         width=1920*.9,
         height=1080*.9,
         legend=dict(
@@ -234,14 +336,10 @@ def plot_duckcurve():
         )
     )
 
-    # Set x-axis title
-    fig.update_xaxes(title_text="time [h]")
+    # Render the plots
+    plot_div = fig.to_html(full_html=False)
 
-    # Set y-axes titles
-    fig.update_yaxes(title_text="Avg. Nhbd. Load kWh/h", secondary_y=False, color="#FFC000")
-    fig.update_yaxes(title_text="Avg. Nhbd. Prod kWh/h", secondary_y=True, color="#006400")
-
-    return render_template('raw.html', plot_div1=fig.to_html(full_html=False))
+    return render_template('raw.html', plot_div1=plot_div)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,28 @@ if __name__ == "__main__":
     topology = 'S_1262876_T_1262881'
     df = pl.read_parquet(os.path.join(path, topology))
 
+    df = df.with_columns((pl.col('fromTime').map_elements(lambda datetime: datetime.hour)).alias('hour'))
+
+    meter_id_list = df.unique(subset='meteringPointId').select('meteringPointId').to_series().to_list()
+
+    for index, meter_id in enumerate(meter_id_list):
+        df_ = df.filter(pl.col('meteringPointId') == meter_id)
+
+        df_=df_.group_by(by='hour').agg(pl.col('p_load_kwh').mean().alias('p_load_max_kwh'),
+                                       pl.col('p_prod_kwh').mean().alias('p_prod_max_kwh')
+                                       ).sort(by='hour')
+        df_=df_.with_columns((pl.col('p_load_max_kwh')-pl.col('p_prod_max_kwh')).alias('p_net_max_kwh'))
+
+        if index==0:
+            fig = px.line(x=df_['hour'], y=df_['p_net_max_kwh'])
+        else:
+            fig.add_scatter(x=df_['hour'], y=df_['p_net_max_kwh'])
+        fig.data[index].showlegend = True
+        fig.data[index].name =  f"[{index}] {meter_id}"
+
+    fig.show()
+
+    '''
     # group AMI's for neighborhood over {every} and solve for total of group
     every = '1h'
     df = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every=every)\
@@ -35,11 +57,6 @@ if __name__ == "__main__":
     )
 
     fig.show()
-
+    '''
     print('d')
-
-    #n_bin =20
-    #bins = np.linspace(0,max(df['nb_load_1h'].max(),df['nb_prod_1h'].max()), n_bin)
-    #hist, bin_edges = np.histogram(df.filter(pl.col('hour')==0).select(f"nb_load_{every}").to_series(),
-    #                                  bins = np.linspace(0,max(df['nb_load_1h'].max(),df['nb_prod_1h'].max()), n_bin))
 

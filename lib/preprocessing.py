@@ -146,7 +146,7 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
             export_min = round(df.select((pl.col('p_prod_kwh')-pl.col('p_load_kwh'))).min().item(),1)
             return float() if export_min is None else round(export_min,1)
 
-        def get_agg_avg_features(df:pl.DataFrame, every: str='1h'):
+        def get_nb_agg_features(df:pl.DataFrame, every: str='1h'):
 
             df = df.with_columns((pl.col('p_prod_kwh')-pl.col('p_load_kwh')).alias('p_pros_kwh')) # Get net export for each AMI at each time
             df_ = df.sort(by=['fromTime']).group_by_dynamic('fromTime', every=every) # Group all AMI's to same time for neighborhood
@@ -176,6 +176,7 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                     f"nb_ex_max": round(df_.select('net_nb_export_kwh').max().item(),1),
                     # maximum aggregated self consumption for grid
                     f"nb_sc_max": round(df_.select('net_nb_self_consumption_kwh').max().item(),1)}
+
 
         def get_agg_duckcurve_profiles(df:pl.DataFrame):
 
@@ -214,7 +215,6 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                     'nb_aggmaxp_idx': prod_max_time,
                     'nb_aggmaxp_val': prod_max_val}
 
-
         # compile features list
         aggregate_every = '1h'
         df_feature = pl.DataFrame(
@@ -231,7 +231,7 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                 'ami_prod_max': get_p_prod_max(df),
                 'ami_ex_max': get_net_export_max(df),
                 'ami_ex_min': get_net_export_min(df)},
-               **get_agg_avg_features(df, every=aggregate_every),
+               **get_nb_agg_features(df, every=aggregate_every),
                **get_agg_duckcurve_profiles(df)
              })
 

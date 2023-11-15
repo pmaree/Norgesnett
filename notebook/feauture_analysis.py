@@ -215,7 +215,7 @@ if __name__ == "__main__":
 
     df1 = reduction_path_3(df)
 
-    # numericla reduction method based on AMS data
+    # numerical reduction method based on AMS data
     df3 = reduction_path_3(df)
 
     # client input on neighborhoods with issues
