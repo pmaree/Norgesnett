@@ -324,7 +324,7 @@ def prescreening():
         yaxis_title=' Number of Neighborhoods (log scale)',
         xaxis_title=r'Number of Plusskunder',
         width=1920*.9,
-        height=1080*.9,
+        height=1080*.85,
         legend=dict(
             yanchor="top",
             y=0.99,
