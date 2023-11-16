@@ -95,9 +95,6 @@ def _timeseries_for_type(df_type: pl.DataFrame, date_from: datetime, date_to: da
         mask = (df_type['value'] < mean + 2*std) & (df_type['value'] > mean - 2*std)
         df_type = df_type.filter(mask)
 
-    if df_type['topology'][0]=='707057500017299122':
-        print('help!')
-
     # Now interpolate / extrapolate and fill for outliers
     df_interp = interpolate(df_type, date_from=date_from, date_to=date_to)
 
@@ -110,7 +107,5 @@ def _timeseries_for_type(df_type: pl.DataFrame, date_from: datetime, date_to: da
             pl.lit(df_type.select(pl.col('unit').first()).item()).alias('unit')
         ]
     ))
-
-
 
     return df.select(['fromTime', 'toTime', 'topology', 'meteringPointId', 'type', 'value', 'unit'])

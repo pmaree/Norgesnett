@@ -1,8 +1,8 @@
 from requests import Request
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
-import yaml, requests, json
-from yaml.loader import SafeLoader
+import requests, json
+from dotenv import load_dotenv
 from typing import List
 import polars as pl
 from math import floor, ceil
@@ -16,12 +16,6 @@ log = Logging()
 PATH = os.path.dirname(__file__)
 
 SAMPLES_PER_BATCH_LIMIT =100000
-CFG_YAML_PATH = PATH + "/.env"
-CONFIG: dict
-
-with open(CFG_YAML_PATH, "r") as cfg_file:
-    CONFIG = yaml.load(cfg_file, Loader=SafeLoader)
-
 
 class Query(BaseModel):
     topology: str = Field(default='')
@@ -106,7 +100,7 @@ def batch_iterator(query: Query):
 
 
 def fetch_bulk(query: Query) -> QueryRes:
-
+    load_dotenv()
     with requests.Session() as s:
 
         # retry strategy
@@ -117,9 +111,9 @@ def fetch_bulk(query: Query) -> QueryRes:
 
             try:
                 # prepare request
-                url = CONFIG['host_url'] + 'timeseries/bulkgetvalues'
+                url = os.getenv('HOST_URL')  + 'timeseries/bulkgetvalues'
                 data = json.dumps({"meteringPointIds": batch_i.ami_id})
-                headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'XApiKey': f"{CONFIG['api_key']}"}
+                headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'XApiKey': f"{os.getenv('NORGESNETT_API_KEY')}"}
                 params={'FromDate': batch_i.from_date.isoformat(),
                         'ToDate': batch_i.to_date.isoformat(),
                         'Type': batch_i.type,
