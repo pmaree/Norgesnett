@@ -42,7 +42,7 @@ def set_px(fig_cnt:int=1):
 
 
 # plot the raw data for visual inspection
-# http://0.0.0.0:9000/plot/raw?topology=S_17279_T_1513&ami=707057500075560028
+# http://0.0.0.0:9000/plot/raw?topology=S_1262876_T_1262881&ami=707057500080789520
 @app.route('/plot/raw')
 def plot_raw_ami():
     path = PATH+f"/data/bronze/measurements"
@@ -59,7 +59,7 @@ def plot_raw_ami():
             break
 
     if ami in ['',None]:
-        return df.unique(subset='meteringPointId').select('meteringPointId').to_pandas().to_html()
+        return df.unique(subset=['meteringPointId','type']).select('meteringPointId','type').sort(by='meteringPointId').to_pandas().to_html()
 
     df = df.filter(pl.col('meteringPointId') == ami)
 
@@ -289,6 +289,8 @@ def plot_duckcurve():
 
     return render_template('processed.html', plot_div1=fig1.to_html(full_html=False), plot_div2=fig2.to_html(full_html=False))
 
+# pre-screening neighborhood selection
+# http://0.0.0.0:9000/plot/prescreening
 @app.route('/plot/prescreening')
 def prescreening():
     path = PATH+f"/data/silver/"
