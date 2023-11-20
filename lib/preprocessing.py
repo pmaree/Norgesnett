@@ -1,7 +1,7 @@
 from datetime import datetime
 import polars as pl
 import pandas as pd
-import os, json, time
+import os, json, time, requests
 
 
 PATH = os.path.dirname(__file__)
@@ -13,6 +13,17 @@ from lib.etl import etl_bronze_to_silver
 from lib import Logging
 
 log = Logging()
+
+def lat_long_to_area_api(latitude: float, longitude: float) -> dict:
+    try:
+        url = 'https://www.ladeassistent.no/api/price-area'
+        headers = {'Content-Type': 'application/json'}
+        payload = {'latitude': latitude, 'longitude': longitude}
+        response = requests.post(url, headers=headers, json=payload)
+        area = response.json()['priceArea']
+        return 'NO1' if area is None else area
+    except requests.exceptions.RequestException as e:
+        print(f"Exception raised in lat_long_to_area_api: {e}")
 
 def prepare_usagepoints():
  
@@ -43,8 +54,8 @@ def prepare_usagepoints():
             
             coord = df_coord.loc[df_coord['topology']==topology] 
             # Holtermanns v. 7, 7030 Trondheim
-            longitude = 63.41368976683344
-            latitude = 10.39801334446785 
+            longitude = 59.857865
+            latitude = 10.660569
 
             try:
                 longitude = coord.iloc[0]['longitude']
@@ -52,6 +63,11 @@ def prepare_usagepoints():
             except Exception as e:
                 missing_coordinates.append(topology) 
               
+            if latitude < longitude:
+                latitude_ = latitude
+                latitude = longitude
+                longitude = latitude
+
             data = {'topology': topology,
                     'longitude':longitude, 
                     'latitude':latitude, 
@@ -106,7 +122,7 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
         def get_coordinate(df: pl.DataFrame, df_coord: pl.DataFrame)->pl.Utf8:
             latitude = df_coord.filter(pl.col('topology')==get_topology(df)).select(pl.col('latitude').first()).item()
             longitude = df_coord.filter(pl.col('topology')==get_topology(df)).select(pl.col('longitude').first()).item()
-            return f"{latitude} {longitude}"
+            return latitude, longitude
         
     
         def get_data_from(df: pl.DataFrame)->pl.Utf8:
@@ -219,7 +235,6 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
         aggregate_every = '1h'
         df_feature = pl.DataFrame(
             {**{'topology': get_topology(df),
-                'coordinate': get_coordinate(df, df_usage_points),
                 'date_from': get_data_from(df),
                 'date_to': get_data_to(df),
                 'sample_cnt':get_sample_cnt(df),
@@ -235,6 +250,13 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                **get_agg_duckcurve_profiles(df)
              })
 
+        # add coordinates and price area
+        latitude, longitude = get_coordinate(df, df_usage_points)
+
+        df_feature = df_feature.with_columns(latitude=pl.lit(latitude),
+                                longitude=pl.lit(longitude),
+                                price_area=pl.lit(lat_long_to_area_api(latitude=latitude, longitude=longitude)))
+
         if verbose:
             with pl.Config() as cfg:
                 cfg.set_tbl_cols(-1)
@@ -242,7 +264,10 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
                 print(df_feature)
 
         # stack features
-        df_features = df_feature if df_features.is_empty() else df_features.vstack(df_feature)
+        try:
+            df_features = df_feature if df_features.is_empty() else df_features.vstack(df_feature)
+        except Exception as e:
+            print(e)
 
     # save features
     log.info(f"[{datetime.now().isoformat()}] Completed feature list construction in {time.time()-t0:.2f} seconds. Write file to {os.path.join(silver_path,file_name)}")
