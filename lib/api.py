@@ -111,7 +111,7 @@ def fetch_bulk(query: Query) -> QueryRes:
 
             try:
                 # prepare request
-                url = os.getenv('HOST_URL')  + 'timeseries/bulkgetvalues'
+                url = os.getenv('HOST_URL')  + 'eNabo/v1/timeseries/bulkgetvalues'
                 data = json.dumps({"meteringPointIds": batch_i.ami_id})
                 headers = {'Accept': 'application/json', 'Content-Type': 'application/json', 'XApiKey': f"{os.getenv('NORGESNETT_API_KEY')}"}
                 params={'FromDate': batch_i.from_date.isoformat(),

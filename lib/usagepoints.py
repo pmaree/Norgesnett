@@ -60,7 +60,7 @@ def preprocess():
             df_ = pl.DataFrame(data, schema={'topology': pl.Utf8,
                                              'longitude':pl.Float64,
                                              'latitude':pl.Float64,
-                                             'ami_id': pl.List(pl.Utf8)})
+                                             'ami_id': pl.Utf8})
             df = df_ if df is None else df.vstack(df_)
             print(f"[{index}] Parsed {df_.shape[0]} unique AMI ID's for topology {topology} at longitude:latitude {longitude}:{latitude}")
 

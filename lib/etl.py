@@ -6,6 +6,8 @@ from lib.timeseries import timeseries
 from lib.api import fetch_bulk, Query
 from lib import Logging
 
+import numpy as np
+
 PATH = os.path.dirname(__file__)
 
 time_format = '%Y-%m-%dT%H:%M:%S'
@@ -61,7 +63,7 @@ def etl_raw(src_path: str, dst_path: str, from_date: datetime, to_date: datetime
             for row in registry.read().rows(named=True):
 
                 processed = row['processed']
-                ami_ids = row['ami_ids']
+                ami_ids = np.array(row['ami_ids']).flatten().tolist()
                 ami_id_cnt = row['ami_id_cnt']
 
                 if processed is False:
@@ -71,10 +73,6 @@ def etl_raw(src_path: str, dst_path: str, from_date: datetime, to_date: datetime
                     log.info(f"[{datetime.utcnow()}] Topology {topology_name} selected for historical measurement retrieval with {ami_id_cnt} AMI associations.")
 
                     for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_ids, from_date=from_date, to_date=to_date, resolution=1, type=1)):
-                        log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
-                        query.df.write_parquet(os.path.join(topology_path, query.name))
-
-                    for query in fetch_bulk(Query(topology=topology_name, ami_id=ami_ids, from_date=from_date, to_date=to_date, resolution=1, type=3)):
                         log.info(f"[{datetime.utcnow()}] {topology_name} successful parquet write for batch <{query.name}> with {query.sample_cnt} samples")
                         query.df.write_parquet(os.path.join(topology_path, query.name))
 
