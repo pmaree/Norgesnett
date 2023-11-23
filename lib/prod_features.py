@@ -1,18 +1,13 @@
 from datetime import datetime
 import polars as pl
-import pandas as pd
-import os, json, time, requests
-
-
-PATH = os.path.dirname(__file__)
-
-import sys
-print(f"Python path:{sys.path}")
+import os, time, requests
 
 from lib.etl import etl_bronze_to_silver
 from lib import Logging
 
+PATH = os.path.dirname(__file__)
 log = Logging()
+
 
 def lat_long_to_area_api(latitude: float, longitude: float) -> dict:
     try:
@@ -25,93 +20,28 @@ def lat_long_to_area_api(latitude: float, longitude: float) -> dict:
     except requests.exceptions.RequestException as e:
         print(f"Exception raised in lat_long_to_area_api: {e}")
 
-def prepare_usagepoints():
- 
-    # source and destination for ETL
-    coordinates_path = PATH + f"/../data/raw/coordinates/usagepoints.csv"
-    src_path = PATH + f"/../data/raw/usagepoints/"
-    dst_path = PATH + f"/../data/bronze/usagepoints/"
 
-    # build file list of topologies containing usagepoints
-    files = []
-    for file_path in os.listdir(src_path):
-        if os.path.isfile(os.path.join(src_path, file_path)):
-            files.append(file_path)
+def preprocess():
 
-    # build usagepoints coordinate map
-    if os.path.isfile(coordinates_path):
-        with open(coordinates_path,'r') as fp:
-            df_coord = pd.read_csv(fp, sep=',').rename(columns={'filename': 'topology'})
-            
-    # parse constructed file list of usagepoints
-    df=None
-    missing_coordinates = []
-    for index, file_path in enumerate(files):
-        with open(os.path.join(src_path, file_path)) as fp:
-            data = fp.read()
-            topology = file_path.split('.json')[0]
-            ami_id = pl.DataFrame(json.loads(data)).select('IdentifiedObject.name').rename({'IdentifiedObject.name': 'ami_id'}).to_numpy().flatten().tolist()
-            
-            coord = df_coord.loc[df_coord['topology']==topology] 
-            # Holtermanns v. 7, 7030 Trondheim
-            longitude = 59.857865
-            latitude = 10.660569
-
-            try:
-                longitude = coord.iloc[0]['longitude']
-                latitude = coord.iloc[0]['latitude']
-            except Exception as e:
-                missing_coordinates.append(topology) 
-              
-            if latitude < longitude:
-                latitude_ = latitude
-                latitude = longitude
-                longitude = latitude
-
-            data = {'topology': topology,
-                    'longitude':longitude, 
-                    'latitude':latitude, 
-                    'ami_id':ami_id}
-            df_ = pl.DataFrame(data, schema={'topology': pl.Utf8, 
-                                            'longitude':pl.Float64, 
-                                            'latitude':pl.Float64, 
-                                            'ami_id': pl.List(pl.Utf8)})
-            df = df_ if df is None else df.vstack(df_)
-            print(f"[{index}] Parsed {df_.shape[0]} unique AMI ID's for topology {topology} at longitude:latitude {longitude}:{latitude}")      
-    
-    assert(df.n_unique('topology') == len(files))
-    log.warning(f"Miss {len(missing_coordinates)} coordinates for following topologies: {missing_coordinates}")          
-           
-    # remove null entries
-    nan_cnt = (df.null_count().select(pl.all()).sum(axis=1).alias('nan')).item()
-    if nan_cnt:
-        df = df.drop_nulls()
-
-    # save parsed data
-    dst_file_path = os.path.join(dst_path, f"{datetime.now().date()}")
-    df.write_parquet(dst_file_path)
-
-    log.info(f"Parsed {index} topologies and saved results at {dst_file_path}")
-
-
-def prepare_features(date_from: str, date_to: str, features_name: str='features', verbose: bool=False):
-
-    # source and destination for ETL
-    bronze_path = PATH + f"/../data/bronze/measurements"
-    silver_path = PATH + f"/../data/silver/"
+    # config for features
+    verbose = False
+    date_from='2023-03-01T00:00:00'
+    date_to='2023-09-01T01:00:00'
+    src_path = PATH + f"/../data/bronze/measurements"
+    dst_path = PATH + f"/../data/bronze/features"
+    usage_points_path = PATH + f"/../data/bronze/usagepoints/2023-11-22"
 
     # read usagepoints files
-    usage_points_path = PATH + f"/../data/bronze/usagepoints/2023-10-18"
     df_usage_points = pl.read_parquet(usage_points_path)
 
     # build feature table per neighborhood
     t0 = time.time()
-    file_list = os.listdir(bronze_path)
+    file_list = os.listdir(src_path)
     df_features = pl.DataFrame()
     for index, file_name in enumerate(file_list):
 
         topology = file_name.split(sep='_2023')[0]
-        log.info(f"[{datetime.now().isoformat()}] Compile feature list for topology {topology} being {index} of {len(file_list)}")
+        log.info(f"[{datetime.now().isoformat()}] Compile production feature list for topology {topology} being {index} of {len(file_list)}")
 
         t0 = time.time()
         df = etl_bronze_to_silver(topology=topology, date_from=date_from, date_to=date_to)
@@ -270,12 +200,10 @@ def prepare_features(date_from: str, date_to: str, features_name: str='features'
             print(e)
 
     # save features
-    log.info(f"[{datetime.now().isoformat()}] Completed feature list construction in {time.time()-t0:.2f} seconds. Write file to {os.path.join(silver_path,file_name)}")
-    df_features.write_parquet(os.path.join(silver_path,features_name))
-
+    dst_file_path = os.path.join(dst_path, f"production_features_{datetime.now().date()}")
+    log.info(f"[{datetime.now().isoformat()}] Completed feature list construction in {time.time()-t0:.2f} seconds. Write file to {dst_file_path}")
+    df_features.write_parquet(os.path.join(dst_file_path))
 
 
 if __name__ == "__main__":
-    #prepare_usagepoints()
-    #
-    prepare_features(date_from='2023-03-01T00:00:00', date_to='2023-09-01T01:00:00')
+    preprocess()
