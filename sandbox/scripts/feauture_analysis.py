@@ -3,7 +3,7 @@ import polars as pl
 import os, json
 
 PATH = os.getcwd()
-path = f"{PATH}/../data/silver/"
+path = f"{PATH}/../../data/bronze/features/"
 
 # Filter neighborhoods on plusskunde penetration
 def r1_filter_penetration(df: pl.DataFrame, lower_limit: float):
@@ -201,7 +201,7 @@ def reduction_path_5(df):
     return df_.unique(subset='topology')
 
 def assoc_ami_list(df):
-    path = f"{PATH}/../data/silver/"
+    path = f"{PATH}/../../data/silver/"
     topology_family = {}
     for topology in df.select(pl.col('topology')).to_series().to_list():
         df_ = pl.read_parquet(os.path.join(path, topology))
@@ -211,7 +211,7 @@ def assoc_ami_list(df):
 
 if __name__ == "__main__":
     # load features table
-    df = pl.read_parquet(os.path.join(path,'features'))
+    df = pl.read_parquet(os.path.join(path,'production'))
 
     df1 = reduction_path_3(df)
 
@@ -230,7 +230,7 @@ if __name__ == "__main__":
 
     # get associated ami list to each topology
     topology_family = assoc_ami_list(df_)
-    with open('topology_shortlisted.json', 'a+') as fp:
+    with open('../data/topology_shortlisted.json', 'a+') as fp:
         fp.write(json.dumps(topology_family))
 
     #df_.select(pl.col('topology')).write_json('shortlisted_topologies')

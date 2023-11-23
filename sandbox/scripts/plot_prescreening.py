@@ -6,9 +6,9 @@ import numpy as np
 PATH = os.path.dirname(__file__)
 
 def plot():
-    path = PATH+f"/../data/silver/"
+    path = PATH+f"/../../data/bronze/features/"
 
-    df_pl = pl.read_parquet(os.path.join(path,'features'))
+    df_pl = pl.read_parquet(os.path.join(path,'production'))
     prod_cnt_list = np.linspace(0,
                                 df_pl.select(pl.col('ami_prod_cnt').max()).item(),
                                 df_pl.select(pl.col('ami_prod_cnt').max()).item()+1)

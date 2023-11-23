@@ -200,7 +200,7 @@ def preprocess():
             print(e)
 
     # save features
-    dst_file_path = os.path.join(dst_path, f"production_features_{datetime.now().date()}")
+    dst_file_path = os.path.join(dst_path, "production")
     log.info(f"[{datetime.now().isoformat()}] Completed feature list construction in {time.time()-t0:.2f} seconds. Write file to {dst_file_path}")
     df_features.write_parquet(os.path.join(dst_file_path))
 
