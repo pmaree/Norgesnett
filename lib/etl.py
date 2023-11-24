@@ -1,6 +1,6 @@
 from datetime import datetime
 import polars as pl
-import os, shutil, time
+import os, shutil, time, re
 
 from lib.timeseries import timeseries
 from lib.api import fetch_bulk, Query
@@ -102,7 +102,6 @@ def etl_raw_to_bronze(src_path: str, dst_path: str):
         df = df.filter(pl.col('processed') == True)
         if df.shape[0]:
 
-            df_processed = pl.DataFrame()
             for index, row in enumerate(df.iter_rows(named=True)):
                 topology_name = row['topology']
                 file_list = os.listdir(os.path.join(src_path,topology_name))
@@ -123,28 +122,23 @@ def etl_raw_to_bronze(src_path: str, dst_path: str):
                     log.info(f"[{index}] Skipped processing measurements for {topology_name} with {df_topology.shape[0]}")
 
 
-def etl_bronze_to_silver(topology: str, date_from: str, date_to: str):
+def etl_bronze_to_silver(src_path: str, dst_path: str):
 
-    # source and destination for ETL
-    bronze_path = PATH + f"/../data/bronze/measurements"
-    silver_path = PATH + f"/../data/silver/"
+    def parse(topology_file: str) -> str:
+        return re.match(r"S_\d+_T_\d+", file_name).group()
 
-    if os.path.isfile(os.path.join(silver_path, topology)):
-        return pl.read_parquet(os.path.join(silver_path, topology))
-    else:
-        # from here onwwards we work only in datetime
-        date_from=datetime.strptime(date_from, time_format)
-        date_to=datetime.strptime(date_to, time_format)
+    file_list = os.listdir(src_path)
+    for index, file_name in enumerate(file_list):
 
-        file_list = os.listdir(bronze_path)
-        for file_name in file_list:
-            if topology == file_name.split(sep='_2023')[0]:
-                df = pl.read_parquet(os.path.join(bronze_path, file_name)).with_columns(topology=pl.lit(topology))
-                break
+        # extract topology name
+        topology = parse(file_name)
 
-        log.info(f"[{datetime.now().isoformat()}] ETL bronze to silver for topology path: {file_name}")
-        topology = file_name.split(sep='_2023')[0]
-        df = pl.read_parquet(os.path.join(bronze_path, file_name)).with_columns(topology=pl.lit(topology))
+        # read topology
+        df = pl.read_parquet(os.path.join(src_path, file_name)).with_columns(topology=pl.lit(topology))
+
+        # obtain maximum date range
+        date_from = datetime.strptime(df.select('fromTime').min().item(), time_format)
+        date_to = datetime.strptime(df.select('fromTime').max().item(), time_format)
 
         # convert date to datetime
         df = (df.sort(by='fromTime')
@@ -152,12 +146,15 @@ def etl_bronze_to_silver(topology: str, date_from: str, date_to: str):
                              pl.col("toTime").str.to_datetime(format=time_format)])) \
             .filter(pl.col("fromTime").is_between(date_from, date_to)).sort(by='fromTime')
         # make sure on unique samples
-        df = df.unique(subset=['meteringPointId','fromTime','toTime','type'], keep='first')
+        df = df.unique(subset=['meteringPointId', 'fromTime', 'toTime', 'type'], keep='first')
 
         # batch timeseries extraction
         df = timeseries(df_topology=df, date_from=date_from, date_to=date_to)
-        df.write_parquet(os.path.join(silver_path, topology))
-        return df
+        df.write_parquet(os.path.join(dst_path, topology))
+
+        log.info(f"[{datetime.utcnow()}] Topology {topology} {index} of {len(file_list)} completed bronze to silver etl.")
+
+
 
 
 
