@@ -91,7 +91,12 @@ def get_diversity_factor(df: pl.DataFrame) -> dict:
     idx_min = factor.select('diversity_factor').to_series().arg_min()
     idx_max = factor.select('diversity_factor').to_series().arg_max()
 
-    return {'df_min':factor.select('diversity_factor').min().item(),
+    nb_day_peak_max = daily_nb_peak_loads.select(pl.col('daily_nb_peak').max()).item()
+    if nb_day_peak_max == 0:
+        raise Exception(f"Topology {df.select(pl.col('topology').first()).item()} discarded due to zero peak-loads")
+
+    return {'nb_day_peak_max': daily_nb_peak_loads.select(pl.col('daily_nb_peak').max()).item(),
+            'df_min':factor.select('diversity_factor').min().item(),
             'df_min_num': factor.select('sum_daily_ami_peaks')[idx_min].item(),
             'df_min_den': factor.select('daily_nb_peak')[idx_min].item(),
             'df_max':factor.select('diversity_factor').max().item(),
@@ -118,7 +123,7 @@ def generator():
             log.exception(f"[{datetime.now().isoformat()}] Failed in generating a feature list for for topology {tf.name} being {index} of {tf.num}: {e}")
 
     # save features
-    dst_file_path = os.path.join(dst_path, "production")
+    dst_file_path = os.path.join(dst_path, 'load')
     log.info(f"[{datetime.now().isoformat()}] Completed feature list for peak load analysis. Write file to {dst_file_path}")
     df_features.write_parquet(os.path.join(dst_file_path))
 

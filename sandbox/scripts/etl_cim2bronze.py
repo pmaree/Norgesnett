@@ -34,8 +34,8 @@ def parse_transformer(path: str) -> pl.DataFrame:
         tf['faceplate'] = element['operationlabel']
     for element in parse_tag(root, 'cim:PowerTransformerEnd'):
         winding  = 'primary' if (element['endNumber'] == '1') else 'secondary'
-        tf[f'{winding}_rated_voltage'] = element['ratedU']
-        tf[f'{winding}_rated_apparent_power'] = element['ratedS']
+        tf[f'{winding}_rated_voltage'] = float(element['ratedU'])
+        tf[f'{winding}_rated_apparent_power'] = float(element['ratedS'])
     return pl.DataFrame(tf)
 
 

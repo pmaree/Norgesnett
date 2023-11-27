@@ -77,7 +77,7 @@ def _timeseries_for_ami(df_ami: pl.DataFrame, date_from: datetime, date_to: date
     # resolve grid export TODO: Need to be expanded to other types on implemented by Norgesnett
     df_=df_timeseries.filter(pl.col('type')==1).sort(by='fromTime', descending=False).rename({'value':'p_load_kwh'}).with_columns(pl.col('fromTime').cast(pl.Datetime())).drop(['type','unit'])
     if df_timeseries.filter(pl.col('type')==3).shape[0]:
-        # joint production column if available
+        # joint load column if available
         df_timeseries = df_.join(df_timeseries.filter(pl.col('type')==3).sort(by='fromTime', descending=False).rename({'value':'p_prod_kwh'}).with_columns(pl.col('fromTime').cast(pl.Datetime())).select(['fromTime','p_prod_kwh']),on='fromTime', validate='1:1')
     else:
         # else set to zero.
