@@ -55,22 +55,42 @@ def get_summary(df: pl.DataFrame) -> dict:
             }
 
 def get_diversity_factor(df: pl.DataFrame) -> dict:
-    # 
+    # calculates the daily peak loads for the respective individual AMI meters
+    # to test: df.filter(pl.col('fromTime').is_between(datetime(2022,9,1),datetime(2022,9,2)))
+    #          .filter((pl.col('meteringPointId')=='707057500017289154')).select(pl.col('p_load_kwh').max())
     daily_ami_peak_loads = (df.sort(by=['fromTime']).group_by_dynamic('fromTime', every='1d', by=['meteringPointId']).agg(pl.col('p_load_kwh').max())
                            .with_columns(pl.col('fromTime').map_elements(lambda d: d + timedelta(days=1))
                                          .alias('toTime')).rename({'p_load_kwh':'daily_ami_peak'})
                            .select('fromTime','toTime','meteringPointId','daily_ami_peak'))
 
+    # sum the daily peaks for all AMI's in neighborhood
+    # test: daily_ami_peak_loads.filter(pl.col('fromTime')==datetime(2022,9,1)).select(pl.col('daily_ami_peak').sum())
     sum_daily_ami_peak_loads = daily_ami_peak_loads.sort('fromTime').group_by_dynamic('fromTime', every='1d').agg(pl.col('daily_ami_peak').sum().alias('sum_daily_ami_peaks'))
 
 
+    # solve for the collective neighborhood daily peak load. we aggregate over 1h to get hourly neighborhood loads, and group over daily increments and
+    # choose the maximum
+    # test:
     daily_nb_peak_loads = (df.sort('fromTime').group_by_dynamic('fromTime', every='1h').agg(pl.col('p_load_kwh').sum())
                             .group_by_dynamic('fromTime', every='1d').agg(pl.col('p_load_kwh').max()).rename({'p_load_kwh':'daily_nb_peak'}))
 
-    diversity_factor = sum_daily_ami_peak_loads.join(daily_nb_peak_loads, on='fromTime', validate='1:1').with_columns((pl.col('sum_daily_ami_peaks')/(pl.col('daily_nb_peak'))).alias('diversity_factor'))
+    # solve the diversity and coincidence factor (these are recipricols of each other). Large diversity factor allows for smaller
+    # dimensioning of trafo. If we choose the smallest historical diversity factor, then we can get a conservative (over specked)
+    # trafo dimensioning.
+    factor = sum_daily_ami_peak_loads.join(daily_nb_peak_loads, on='fromTime', validate='1:1')\
+        .with_columns((pl.col('sum_daily_ami_peaks')/(pl.col('daily_nb_peak'))).alias('diversity_factor'))
 
+    # get the index of argument that minimize / maximize load factors to store their values
+    idx_min = factor.select('diversity_factor').to_series().arg_min()
+    idx_max = factor.select('diversity_factor').to_series().arg_max()
 
-    return {'diversity_factor':diversity_factor.select('diversity_factor').min().item()}
+    return {'df_min':factor.select('diversity_factor').min().item(),
+            'df_min_num': factor.select('sum_daily_ami_peaks')[idx_min],
+            'df_min_den': factor.select('daily_nb_peak')[idx_min],
+            'df_max':factor.select('diversity_factor').max().item(),
+            'df_max_num': factor.select('sum_daily_ami_peaks')[idx_max],
+            'df_max_den': factor.select('daily_nb_peak')[idx_max]
+            }
 
 
 def generator():
@@ -79,11 +99,11 @@ def generator():
 
     topology_features = pl.DataFrame()
     for tf in topology_gen(path=topology_measurement_path):
-        get_diversity_factor(tf.data)
+
         topology_features = pl.DataFrame({**get_summary(tf.data),
                                           **coord.get(tf.name),
                                           **trafo.get(tf.name),
-                                          **get_diversity_factor(tf.data)
+                                          **get_load_factors(tf.data)
                                           })
 
 
