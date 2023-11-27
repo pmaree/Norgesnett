@@ -2,6 +2,11 @@ from datetime import datetime, timedelta
 import polars as pl
 import os
 
+from lib import Logging
+
+PATH = os.path.dirname(__file__)
+log = Logging()
+
 class Tf:
     def __init__(self, path: str):
         self.df = pl.read_parquet(path)
@@ -10,6 +15,7 @@ class Tf:
         return (self.df.filter(pl.col('topology')==name)
                 .rename({'primary_rated_voltage':'pri_kv','primary_rated_apparent_power':'pri_kva','secondary_rated_voltage':'sec_kv','secondary_rated_apparent_power':'sec_kva'})
                 .select('pri_kv','pri_kva','sec_kv','sec_kva')).to_dicts()[0]
+
 
 class Coord:
     def __init__(self, path: str):
@@ -28,9 +34,10 @@ def load_transformer_data(path:str) -> pl.DataFrame:
 
 
 class Topology:
-    def __init__(self, path: str, name: str):
+    def __init__(self, path: str, name: str, num: int):
         self.__topology = name
         self.__df = pl.read_parquet(os.path.join(path, name))
+        self.num = num
 
     @property
     def name(self):
@@ -44,7 +51,7 @@ class Topology:
 def topology_gen(path:str) -> Topology:
     topology_list = os.listdir(path)
     for topology in topology_list:
-        yield Topology(path=path, name=topology)
+        yield Topology(path=path, name=topology, num=len(topology_list))
 
 
 def get_summary(df: pl.DataFrame) -> dict:
@@ -85,27 +92,35 @@ def get_diversity_factor(df: pl.DataFrame) -> dict:
     idx_max = factor.select('diversity_factor').to_series().arg_max()
 
     return {'df_min':factor.select('diversity_factor').min().item(),
-            'df_min_num': factor.select('sum_daily_ami_peaks')[idx_min],
-            'df_min_den': factor.select('daily_nb_peak')[idx_min],
+            'df_min_num': factor.select('sum_daily_ami_peaks')[idx_min].item(),
+            'df_min_den': factor.select('daily_nb_peak')[idx_min].item(),
             'df_max':factor.select('diversity_factor').max().item(),
-            'df_max_num': factor.select('sum_daily_ami_peaks')[idx_max],
-            'df_max_den': factor.select('daily_nb_peak')[idx_max]
+            'df_max_num': factor.select('sum_daily_ami_peaks')[idx_max].item(),
+            'df_max_den': factor.select('daily_nb_peak')[idx_max].item()
             }
 
 
 def generator():
 
-    topology_measurement_path = os.path.join(os.path.dirname(__file__), '../../data/silver/measurements/')
+    src_path = PATH + f"/../../data/silver/measurements"
+    dst_path = PATH + f"/../../data/silver/features"
 
-    topology_features = pl.DataFrame()
-    for tf in topology_gen(path=topology_measurement_path):
+    df_features = pl.DataFrame()
+    for index, tf in enumerate(topology_gen(path=src_path)):
 
-        topology_features = pl.DataFrame({**get_summary(tf.data),
-                                          **coord.get(tf.name),
-                                          **trafo.get(tf.name),
-                                          **get_load_factors(tf.data)
-                                          })
+        log.info(f"[{datetime.now().isoformat()}] Compile production feature list for topology {tf.name} being {index} of {tf.num}")
 
+        try:
+            df_feature = pl.DataFrame({**get_summary(tf.data),**coord.get(tf.name),**trafo.get(tf.name),**get_diversity_factor(tf.data)})
+
+            df_features = df_feature if df_features.is_empty() else df_features.vstack(df_feature)
+        except Exception as e:
+            log.exception(f"[{datetime.now().isoformat()}] Failed in generating a feature list for for topology {tf.name} being {index} of {tf.num}: {e}")
+
+    # save features
+    dst_file_path = os.path.join(dst_path, "production")
+    log.info(f"[{datetime.now().isoformat()}] Completed feature list for peak load analysis. Write file to {dst_file_path}")
+    df_features.write_parquet(os.path.join(dst_file_path))
 
 
 if __name__ == "__main__":
