@@ -21,7 +21,8 @@ def set_px(fig_cnt:int=1):
     px.defaults.height = 1080*0.9/fig_cnt
 
 def get_topology_trafo_sec_kva(topology: str) -> float:
-    return pl.read_parquet(os.path.join(PATH,f"data/silver/features/load")).filter(pl.col('topology_name')==topology).select('sec_kva').item()
+    return pl.read_parquet(os.path.join(PATH,f"data/silver/features/load")).filter(pl.col('topology_name')==topology).select('ami_cnt').item(),\
+        pl.read_parquet(os.path.join(PATH,f"data/silver/features/load")).filter(pl.col('topology_name')==topology).select('sec_kva').item()
 
 # http://0.0.0.0:9000/features?sort_by=trafo_utilization&descending=1&show_n=100&ami_cnt=10
 @app.route('/features')
@@ -98,48 +99,52 @@ def plot_diversity():
     # sum the peaks for the AMI's over the days
     df_ami = df_ami.sort(by=['fromTime']).group_by_dynamic('fromTime', every='1d').agg(pl.col('ami_daily_peak_load').sum().alias('ami_daily_sum_peak_load'))
 
-    # plot daily sum of AMI peaks, max of neighborhood peak, diversity factor
-    set_px(3)
-
     # plot sum of AMI peaks taken for daily intervals
-    fig1 = make_subplots(specs=[[{"secondary_y": True}]])
+    fig = make_subplots(rows=3, cols=1,specs=[[{"secondary_y": True}],[{"secondary_y": True}],[{"secondary_y": True}]],
+                        subplot_titles=['Load Peak Coefficients','Trafo Utilization','Load Factors'])
 
-    fig1.add_trace(go.Scatter(x=df_ami['fromTime'], y=df_ami['ami_daily_sum_peak_load'], name=f"AMI Sum", line=dict(color="#FFC000")),secondary_y=False)
-    fig1.add_trace(go.Scatter(x=df_nb['fromTime'], y=df_nb['nb_daily_max_peak_load'], name=f"NB Agg", line=dict(color="#006400")),secondary_y=True)
+    fig.add_trace(go.Scatter(x=df_ami['fromTime'], y=df_ami['ami_daily_sum_peak_load'],name='AMI Sum', line=dict(color="#89CFF0")),secondary_y=False, row=1, col=1)
+    fig.add_trace(go.Scatter(x=df_nb['fromTime'], y=df_nb['nb_daily_max_peak_load'],name='NB Agg', line=dict(color="#7FFFD4")),secondary_y=True, row=1, col=1)
 
-    fig1.update_xaxes(title_text='time')
-    fig1.update_layout(title=dict(text=f"Peak load analysis", x=0.5, y=0.95, font=dict(size=18, color='black'), xanchor='center'))
-    fig1.update_yaxes(title_text="AMI Sum kWh", secondary_y=False, color="#FFC000")
-    fig1.update_yaxes(title_text="NB Peak kWh", secondary_y=True, color="#006400")
+    fig.update_xaxes(title_text='time', row=1, col=1)
+    fig.update_yaxes(title_text="kWh/h", secondary_y=False, color="#89CFF0", row=1, col=1)
+    fig.update_yaxes(title_text="kWh/h", secondary_y=True, color="#7FFFD4", row=1, col=1)
 
     # plot neighborhood peak load for period intervals of 1 day
-    trafo_kva_rating = get_topology_trafo_sec_kva(topology=topology)
+    ami_cnt, trafo_kva_rating = get_topology_trafo_sec_kva(topology=topology)
     df_trafo = df_nb.with_columns((pl.col('nb_daily_max_peak_load')/trafo_kva_rating*100).alias('trafo_utilization'))
 
-    fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+    fig.add_trace(go.Scatter(x=df_trafo['fromTime'], y=df_trafo['trafo_utilization'], line=dict(color="#00FFFF")),secondary_y=False, row=2, col=1)
+    fig.add_trace(go.Scatter(x=df_nb['fromTime'], y=df_nb['nb_daily_max_peak_load'], line=dict(color="#454B1B", dash='dash')),secondary_y=True, row=2, col=1)
 
-    fig2.add_trace(go.Scatter(x=df_trafo['fromTime'], y=df_trafo['trafo_utilization'], name=f"TF Util. [%]", line=dict(color="#FFC000")),secondary_y=False)
-    fig2.add_trace(go.Scatter(x=df_nb['fromTime'], y=df_nb['nb_daily_max_peak_load'], name=f"NB Peak kWh", line=dict(color="#006400", dash='dash')),secondary_y=True)
-
-    fig2.update_xaxes(title_text='time')
-    fig2.update_layout(title=dict(text=f"Trafo utilization for daily maximum peaks", x=0.5, y=0.95, font=dict(size=18, color='black'), xanchor='center'))
-    fig2.update_yaxes(title_text="Util.", secondary_y=False, color="#FFC000")
-    fig2.update_yaxes(title_text="Peak", secondary_y=True, color="#006400")
+    fig.update_xaxes(title_text='time', row=2, col=1)
+    fig.update_yaxes(title_text="%", secondary_y=False, color="#00FFFF", row=2, col=1)
+    fig.update_yaxes(title_text="kWh/h", secondary_y=True, color="#454B1B", row=2, col=1)
 
     # plot the diversity factor for neighborhood
-    df_factors = (df_ami.join(df_nb, on='fromTime', validate='1:1').with_columns((pl.col('nb_daily_max_peak_load')/pl.col('ami_daily_sum_peak_load')*100).alias('coincidence_factor')))\
+    df_factors = (df_ami.join(df_nb, on='fromTime', validate='1:1').with_columns((pl.col('nb_daily_max_peak_load')/pl.col('ami_daily_sum_peak_load')*100).alias('coincidence_factor'))) \
         .with_columns((pl.col('ami_daily_sum_peak_load')/pl.col('nb_daily_max_peak_load')).alias('diversity_factor'))
 
-    fig3 = make_subplots(specs=[[{"secondary_y": True}]])
-    fig3.add_trace(go.Scatter(x=df_factors['fromTime'], y=df_factors['coincidence_factor'], name=f"CF [%]", line=dict(color="#FFC000")),secondary_y=False)
-    fig3.add_trace(go.Scatter(x=df_factors['fromTime'], y=df_factors['diversity_factor'], name=f"DF", line=dict(color="#006400")),secondary_y=True)
+    fig.add_trace(go.Scatter(x=df_factors['fromTime'], y=df_factors['coincidence_factor'],name='CF', line=dict(color="#7393B3")),secondary_y=False, row=3, col=1)
+    fig.add_trace(go.Scatter(x=df_factors['fromTime'], y=df_factors['diversity_factor'],name='DF', line=dict(color="#088F8F")),secondary_y=True, row=3, col=1)
 
-    fig3.update_xaxes(title_text='time')
-    fig3.update_layout(title=dict(text=f"Load factors for neighborhood", x=0.5, y=0.95, font=dict(size=18, color='black'), xanchor='center'))
-    fig3.update_yaxes(title_text="CF", secondary_y=False, color="#FFC000")
-    fig3.update_yaxes(title_text="DF", secondary_y=True, color="#006400")
+    fig.update_xaxes(title_text='time', row=3, col=1)
+    fig.update_yaxes(title_text="%", secondary_y=False, color="#7393B3", row=3, col=1)
+    fig.update_yaxes(title_text="float", secondary_y=True, color="#088F8F", row=3, col=1)
 
-    return render_template('diversity.html', plot_div1=fig1.to_html(full_html=False), plot_div2=fig2.to_html(full_html=False), plot_div3=fig3.to_html(full_html=False))
+    # Add figure title
+    fig.update_layout(
+        title=dict(text=f"Neighborhood {topology} (#AMI {ami_cnt})", xanchor='left'),
+        width=1920*.9,
+        height=1080*.9,
+        font=dict(
+            family="Courier New, monospace",
+            size=18,
+            color="#000000"
+        )
+    )
+
+    return render_template('raw.html', plot_div1=fig.to_html(full_html=False))
 
 
 if __name__ == "__main__":
