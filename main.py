@@ -38,9 +38,13 @@ def sort_features():
 
     # Some additional features of interest
     df = df.filter(pl.col('ami_cnt')>ami_cnt).with_columns((pl.col('nb_day_peak_max')/pl.col('sec_kva')*100).alias('trafo_utilization'))
+    df = df.with_columns((pl.col('nb_day_peak_max')/pl.col('df_min')).alias('sec_kva_max')) # Using smalest DF, speck most over spesified trafo size
+    df = df.with_columns((pl.col('nb_day_peak_max')/pl.col('df_max')).alias('sec_kva_min')) # Using largest DF, speck most restrictive trafo size
+    df = df.with_columns(((pl.col('nb_day_peak_max')-pl.col('sec_kva'))/pl.col('sec_kva')*100).alias('sec_kva_breach'))
+
 
     if sort_by is not None and sort_by in df.columns:
-        return df.sort(by=sort_by, descending=bool(descending)).head(show_n).to_pandas().to_html()
+        return df.sort(by=sort_by, descending=bool(descending)).head(show_n).select('topology_name','ami_cnt','sec_kva','nb_day_peak_max','sec_kva_breach','sec_kva_min','sec_kva_max','df_min','df_max','trafo_utilization').to_pandas().to_html()
     return df.head(show_n).to_pandas().to_html()
 
 # Plot the processed time series for aggegrgaed and average production and consumption for a neighborhood
