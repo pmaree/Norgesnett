@@ -24,13 +24,13 @@ app = Flask(__name__,template_folder='template')
 # http://0.0.0.0:9000/features?sort_by=ami_prod_cnt&descending=1&show_n=100
 @app.route('/features')
 def sort_features():
-    path = PATH+f"/data/silver/"
+    path = PATH+f"/data/bronze/features"
 
     descending = request.args.get('descending', default=0, type=int)
     sort_by = request.args.get('sort_by', default='fromTime', type=str)
     show_n = request.args.get('show_n', default=10, type=int)
 
-    df = pl.read_parquet(os.path.join(path,'features'))
+    df = pl.read_parquet(os.path.join(path,'production'))
     if sort_by is not None and sort_by in df.columns:
         return df.sort(by=sort_by, descending=bool(descending)).head(show_n).to_pandas().to_html()
     return df.head(show_n).to_pandas().to_html()
